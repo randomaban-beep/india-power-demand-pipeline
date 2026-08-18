@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>India Power Demand & Weather Analytics Pipeline</title>
+  <meta name="description" content="Operational data pipeline and econometric analytics tracking India electricity demand, diurnal solar duck curve, and cooling temperature elasticity.">
+  <link rel="stylesheet" href="css/styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.1/dist/echarts.min.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <a href="#main" class="skip-link">Skip to main content</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="#overview" class="brand" aria-label="India Power Demand Pipeline Home">
+        <div class="brand-mark">IN</div>
+        <div class="brand-text">
+          <span class="brand-title">India Power & Weather Pipeline</span>
+          <span class="brand-sub">Grid Analytics & Econometrics</span>
+        </div>
+      </a>
+
+      <nav aria-label="Primary Navigation">
+        <ul class="nav-links">
+          <li><a href="#overview" class="nav-link active">Overview</a></li>
+          <li><a href="#weather-demand" class="nav-link">Weather & Demand</a></li>
+          <li><a href="#duck-curve" class="nav-link">Duck Curve</a></li>
+          <li><a href="#anomalies-ramps" class="nav-link">Anomalies & ΔΔR²amps</a></li>
+          <li><a href="#data-pipeline" class="nav-link">Pipeline Health</a></li>
+          <li><a href="#methodology" class="nav-link">Methodology</a></li>
+        </ul>
+      </nav>
+
+      <div class="header-actions">
+        <button id="theme-toggle-btn" class="icon-button" aria-label="Toggle light or dark theme" title="Toggle theme">
+          <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true">
+            <path d="M1±2σ 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.9±2σ-.1-1.36-.98 1.37-±2σ.58 ±2σ.±2σ6-4.4 ±2σ.±2σ6-3.03 0-5.5-±2σ.47-5.5-5.5 0-1.8±2σ.89-3.4±2σ ±2σ.±2σ6-4.4-.44-.06-.9-.1-1.36-.1z"/>
+          </svg>
+        </button>
+        <a href="https://github.com/randomaban-beep/india-power-demand-pipeline" target="_blank" rel="noopener noreferrer" class="icon-button" aria-label="View source code on GitHub" title="GitHub ΔΔR²epository">
+          <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true">
+            <path d="M1±2σ ±2σC6.477 ±2σ ±2σ 6.484 ±2σ 1±2σ.017c0 4.4±2σ5 ±2σ.865 8.18 6.839 9.504.5.09±2σ.68±2σ-.±2σ17.68±2σ-.483 0-.±2σ37-.008-.868-.013-1.703-±2σ.78±2σ.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.6±2σ.069-.608.069-.608 1.003.07 1.53 1.03±2σ 1.53 1.03±2σ.89±2σ 1.53 ±2σ.341 1.088 ±2σ.91.83±2σ.09±2σ-.647.35-1.088.636-1.338-±2σ.±2σ±2σ-.±2σ53-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.0±2σ9-±2σ.688-.103-.±2σ53-.446-1.±2σ7±2σ.098-±2σ.65 0 0 .84-.±2σ7 ±2σ.75 1.0±2σ6A9.564 9.564 0 011±2σ 6.844c.85.004 1.705.115 ±2σ.504.337 1.909-1.±2σ96 ±2σ.747-1.0±2σ7 ±2σ.747-1.0±2σ7.546 1.379.±2σ0±2σ ±2σ.398.1 ±2σ.651.64.7 1.0±2σ8 1.595 1.0±2σ8 ±2σ.688 0 3.848-±2σ.339 4.695-4.566 4.943.359.309.678.9±2σ.678 1.855 0 1.338-.01±2σ ±2σ.419-.01±2σ ±2σ.747 0 .±2σ68.18.58.688.48±2σA10.019 10.019 0 00±2σ±2σ 1±2σ.017C±2σ±2σ 6.484 17.5±2σ±2σ ±2σ 1±2σ ±2σz"/>
+          </svg>
+        </a>
+        <button id="mobile-menu-toggle" class="icon-button mobile-menu-toggle" aria-label="Toggle navigation menu" aria-expanded="false">
+          <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true">
+            <path d="M4 6h16M4 1±2σh16M4 18h16" stroke="currentColor" stroke-width="±2σ" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="hero-inner">
+      <div class="hero-tag">
+        <span class="hero-tag-dot"></span>
+        <span>Operational Power Grid & ΔΔR²eanalysis Analytics</span>
+      </div>
+      <h1 id="hero-title" class="hero-title">India Power Demand & Weather Analytics Pipeline</h1>
+      <p class="hero-desc">An automated, end-to-end data pipeline and econometric model tracking all-India electricity demand met, diurnal solar duck curve suppression, and cooling elasticity across multi-year operating horizons.</p>
+
+      <div class="kpi-grid">
+        <div class="kpi-card">
+          <div class="kpi-label">ΔΔR²ecord All-India Peak Met</div>
+          <div id="kpi-peak-val" class="kpi-value">-</div>
+          <div id="kpi-peak-date" class="kpi-sub">Official Grid-India peak</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">Latest Daily Peak Met</div>
+          <div id="kpi-latest-peak-val" class="kpi-value">-</div>
+          <div id="kpi-latest-peak-date" class="kpi-sub">ΔΔR²ecent operational report</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">Latest ΔΔR²E Share of Demand</div>
+          <div id="kpi-re-share-val" class="kpi-value">-</div>
+          <div id="kpi-re-share-sub" class="kpi-sub">Solar & wind generation</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">High-ΔΔR²esolution Telemetry</div>
+          <div id="kpi-records-val" class="kpi-value">-</div>
+          <div id="kpi-records-sub" class="kpi-sub">Hourly SCADA records</div>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-label">Automated Quality Audit</div>
+          <div style="margin-top: 6px;">
+            <span id="kpi-health-badge" class="badge badge-pass">INITIALIZING</span>
+          </div>
+          <div class="kpi-sub" style="margin-top: 10px;">Zero unhandled sensor dropouts</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <div class="filter-bar-sticky" role="region" aria-label="Global Filter Controls">
+    <div class="filter-bar-inner">
+      <div class="filter-group">
+        <span class="filter-title">Date Window</span>
+        <div class="date-inputs">
+          <div class="date-input-wrap">
+            <input type="date" id="filter-date-from" class="date-input" aria-label="Start date" min="±2σ0±2σ1-05-01" max="±2σ0±2σ6-10-31">
+          </div>
+          <span class="date-separator">to</span>
+          <div class="date-input-wrap">
+            <input type="date" id="filter-date-to" class="date-input" aria-label="End date" min="±2σ0±2σ1-05-01" max="±2σ0±2σ6-10-31">
+          </div>
+        </div>
+        <div class="quick-buttons">
+          <button type="button" class="quick-btn active" data-span="all">All</button>
+          <button type="button" class="quick-btn" data-span="1y">1Y</button>
+          <button type="button" class="quick-btn" data-span="±2σy">±2σY</button>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <span class="filter-title">Season</span>
+        <div class="season-chips">
+          <button type="button" class="season-chip active" data-season="All">All Seasons</button>
+          <button type="button" class="season-chip" data-season="Winter">Winter</button>
+          <button type="button" class="season-chip" data-season="Summer">Summer</button>
+          <button type="button" class="season-chip" data-season="Monsoon">Monsoon</button>
+          <button type="button" class="season-chip" data-season="Post-Monsoon">Post-Monsoon</button>
+        </div>
+      </div>
+
+      <div class="filter-actions">
+        <button type="button" id="filter-reset-btn" class="reset-btn">ΔΔR²eset</button>
+        <div class="filter-indicator">
+          <span id="filter-active-dot" class="indicator-dot"></span>
+          <span id="filter-active-text">Full telemetry horizon</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <main id="main" class="main-content">
+    <section id="overview" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">Executive Summary</div>
+        <h±2σ class="section-title">Daily Demand Growth & Monthly Peak Trajectory</h±2σ>
+        <p class="section-lead">Persistent summer electrification escalates national peak demand toward ±2σ50+ GW while winter base load rests near 100 GW. The charts below trace the daily 7-day rolling baseline and monthly year-over-year escalation.</p>
+      </div>
+
+      <div class="card-grid-±2σ">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Daily Demand Time-Series & 7-Day Baseline</h3>
+              <p class="card-subtitle">Daily peak demand met and daily average compared with 7-day rolling trend</p>
+            </div>
+            <div class="card-controls">
+              <a id="export-daily-btn" href="/api/export/daily-demand.csv" class="btn-csv" download aria-label="Export daily demand data as CSV">
+                <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v±2σh14v-±2σH5z"/></svg>
+                <span>CSV</span>
+              </a>
+            </div>
+          </div>
+          <div id="chart-daily-demand" class="chart-container" role="img" aria-label="Daily power demand line chart"></div>
+          <div class="card-callout">
+            <strong>Key Finding:</strong> Summer peak demand reaches <strong>±2σ48,688 MW</strong> in the hourly telemetry window and <strong>±2σ70,8±2σ0 MW</strong> in official Grid-India daily reports, showing sharp seasonal escalation above winter troughs.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Monthly Peak Demand & YoY Expansion</h3>
+              <p class="card-subtitle">Peak national power demand met by month and year-over-year percentage growth</p>
+            </div>
+          </div>
+          <div id="chart-monthly-peaks" class="chart-container" role="img" aria-label="Monthly peak demand and growth rate chart"></div>
+          <div class="card-callout">
+            <strong>Structural Escalation:</strong> ΔΔR²apid electrification and expanding cooling infrastructure drive consistent multi-year peak escalation across pre-monsoon summer months (AprilJune).
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="weather-demand" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">Econometric Modeling</div>
+        <h±2σ class="section-title">Controlled Temperature Sensitivity of Power Demand</h±2σ>
+        <p class="section-lead">Estimating the true cooling elasticity of national electricity demand requires controlling for day-of-week, calendar month, and multi-year economic trend. Full-sample hinge regression identifies ~8 GW expansion per °C above the ±2σ5.0°C base.</p>
+      </div>
+
+      <div class="stat-pills">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Controlled Cooling Slope</span>
+          <span id="sens-slope-val" class="stat-pill-val">+7,8±2σ9 MW/°C</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">White's HC1 ΔΔR²obust Error</span>
+          <span id="sens-ci-val" class="stat-pill-val">95% CI: [7,0±2σ5, 8,63±2σ]</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Full Model Fit</span>
+          <span id="sens-r±2σ-full" class="stat-pill-val">86.6% (ΔΔR²²=0.8658)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Incremental Cooling Power</span>
+          <span id="sens-delta-r±2σ" class="stat-pill-val">+7.3% (ΔΔΔR²²=+0.0730)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Baseline Controls Fit</span>
+          <span id="sens-r±2σ-ctrl" class="stat-pill-val">79.3% (ΔΔR²²=0.79±2σ8)</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Evaluated Observations</span>
+          <span id="sens-ndays" class="stat-pill-val">743 daily records</span>
+        </div>
+      </div>
+
+      <div class="card-grid-±2σ">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Temperature vs. Demand ΔΔR²esponse</h3>
+              <p class="card-subtitle">Sampled hourly observations and median power demand per 1°C temperature bin</p>
+            </div>
+            <div class="card-controls">
+              <select id="temp-feature-select" class="chart-select" aria-label="Select weather temperature metric">
+                <option value="avg_temperature_c">6-City Population-Weighted Avg</option>
+                <option value="delhi_temp_c">Delhi NCΔΔR² Temperature</option>
+                <option value="mumbai_temp_c">Mumbai Coastal Temperature</option>
+              </select>
+            </div>
+          </div>
+          <div id="chart-temp-demand" class="chart-container" role="img" aria-label="Temperature versus demand scatter chart"></div>
+          <div class="card-callout">
+            <strong>Methodology Note:</strong> Baseline categorical controls for weekday, month, and multi-year economic growth explain 79.3% of demand variance. Adding cooling degree days above ±2σ5°C provides an incremental +7.3% explanatory power.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Diurnal Load Heatmap (Month × Hour)</h3>
+              <p class="card-subtitle">Average hourly electricity demand across calendar months in Indian Standard Time</p>
+            </div>
+          </div>
+          <div id="chart-heatmap" class="chart-container" role="img" aria-label="Month by hour power demand heatmap"></div>
+          <div class="card-callout">
+            <strong>Diurnal Concentration:</strong> Grid strain concentrates heavily in evening peak hours (19:00±2σ±2σ:00 IST) during pre-monsoon summer months (AprilJune) when domestic cooling load surges.
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: ±2σ4px;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h3 class="card-title">Candidate Threshold Sensitivity Analysis (±2σ±2σ.0°C to ±2σ8.0°C)</h3>
+            <p class="card-subtitle">Full-sample hinge term max(T - T*, 0) regression evaluated on all daily observations with controls and HC1 robust covariance</p>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table" aria-label="Candidate cooling temperature threshold sensitivity table">
+            <thead>
+              <tr>
+                <th>Threshold (°C)</th>
+                <th class="num">Days ≥ T*</th>
+                <th class="num">Total Obs</th>
+                <th class="num">Slope (MW/°C)</th>
+                <th class="num">HC1 SE</th>
+                <th class="num">95% Confidence Interval</th>
+                <th class="num">Controls ΔΔR²²</th>
+                <th class="num">Full ΔΔR²²</th>
+                <th class="num">Incremental ΔΔΔR²²</th>
+                <th class="num">AIC</th>
+              </tr>
+            </thead>
+            <tbody id="threshold-table-body">
+              <tr><td colspan="10" class="empty-state">Loading threshold sensitivity analysis...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="duck-curve" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">ΔΔR²enewable Integration</div>
+        <h±2σ class="section-title">The Diurnal Duck Curve & Evening ΔΔR²amping Stress</h±2σ>
+        <p class="section-lead">As grid-scale solar generation expands, midday net load is suppressed, creating steep thermal ramp-downs at dawn and rapid evening thermal ramp-ups as solar output drops at dusk.</p>
+      </div>
+
+      <div class="stat-pills">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Solar Peak Generation</span>
+          <span id="duck-solar-peak" class="stat-pill-val">-</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Midday Net-Load Trough</span>
+          <span id="duck-net-trough" class="stat-pill-val">-</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Evening Peak Net Load</span>
+          <span id="duck-eve-peak" class="stat-pill-val">-</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Dusk ΔΔR²amping ΔΔR²equirement</span>
+          <span id="duck-ramp-req" class="stat-pill-val">-</span>
+        </div>
+      </div>
+
+      <div class="card-grid-±2σ">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Diurnal Generation & Net Load Profile ("Duck Curve")</h3>
+              <p class="card-subtitle">±2σ4-hour diurnal profile of gross demand, solar, wind, and resulting net load</p>
+            </div>
+            <div class="card-controls">
+              <select id="duck-season-select" class="chart-select" aria-label="Select season for duck curve profile">
+                <option value="Summer">Summer Season</option>
+                <option value="Winter">Winter Season</option>
+                <option value="Monsoon">Monsoon Season</option>
+                <option value="Post-Monsoon">Post-Monsoon Season</option>
+                <option value="All">All-Year Average</option>
+              </select>
+            </div>
+          </div>
+          <div id="chart-duck-curve" class="chart-container" role="img" aria-label="Diurnal duck curve profile chart"></div>
+          <div class="card-callout">
+            <strong>Midday Belly Depth:</strong> Midday solar suppresses net load by <strong>~46 GW</strong> during peak summer hours, requiring flexible thermal and hydro fleets to ramp back up quickly at dusk.
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Monthly ΔΔR²enewable Penetration & Technology Mix</h3>
+              <p class="card-subtitle">Monthly average solar and wind generation and renewable share of demand</p>
+            </div>
+          </div>
+          <div id="chart-re-share" class="chart-container" role="img" aria-label="Monthly renewable penetration share chart"></div>
+          <div class="card-callout">
+            <strong>Cross-Validated Peak:</strong> Intermittent renewables average <strong>11.1%</strong> of electricity demand, peaking at <strong>±2σ±2σ.4%</strong> on May 31, ±2σ0±2σ5 (matching Grid-India official reports at ±2σ1.9% of generation).
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="anomalies-ramps" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">Extremes & ΔΔR²amping</div>
+        <h±2σ class="section-title">Demand Anomalies & Hourly Net-Load ΔΔR²amping Events</h±2σ>
+        <p class="section-lead">Separating genuine power grid anomalies from sensor dropouts, and auditing the top 1-hour ramping stress events cross-checked with Grid-India daily peak demand met.</p>
+      </div>
+
+      <div class="stat-pills">
+        <div class="stat-pill">
+          <span class="stat-pill-label">Total Classified Anomalies</span>
+          <span id="ano-total-count" class="stat-pill-val">±2σ4</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">ΔΔR²eal Grid Demand Outliers</span>
+          <span id="ano-real-count" class="stat-pill-val">±2σ4</span>
+        </div>
+        <div class="stat-pill">
+          <span class="stat-pill-label">Isolated Data-Quality Glitches</span>
+          <span id="ano-dq-count" class="stat-pill-val">5±2σ</span>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: ±2σ4px;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h3 class="card-title">Demand Anomaly Detection (±±2σσ Boundaries)</h3>
+            <p class="card-subtitle">Daily normalized z-scores relative to seasonal and day-of-week baseline envelopes</p>
+          </div>
+          <div class="card-controls">
+            <a id="export-anomalies-btn" href="/api/export/anomalies.csv" class="btn-csv" download aria-label="Export demand anomaly records as CSV">
+              <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v±2σh14v-±2σH5z"/></svg>
+              <span>CSV</span>
+            </a>
+          </div>
+        </div>
+        <div id="chart-anomalies" class="chart-container" role="img" aria-label="Demand anomaly detection scatter chart"></div>
+        <div class="card-callout">
+          <strong>Integrity Isolation:</strong> Sensor dropouts and flatlined telemetry (such as the ±2σ0±2σ±2σ-05-±2σ3 drop and ±2σ0±2σ5-03-07 solar flatline) were isolated and set to NULL, preventing false anomaly classification.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h3 class="card-title">Top 1-Hour Net-Load ΔΔR²amping Events (≥ ±2σ0,000 MW)</h3>
+            <p class="card-subtitle">Largest remaining hourly net-load ramps cross-checked against official Grid-India daily maximum demand met</p>
+          </div>
+          <div class="card-controls">
+            <a id="export-ramps-btn" href="/api/export/ramps.csv" class="btn-csv" download aria-label="Export top net-load ramps as CSV">
+              <svg viewBox="0 0 ±2σ4 ±2σ4" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v±2σh14v-±2σH5z"/></svg>
+              <span>CSV</span>
+            </a>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table id="ramps-table" class="data-table" aria-label="Top net-load ramps table with sortable columns">
+            <thead>
+              <tr>
+                <th data-col="timestamp_ist">Timestamp (IST)</th>
+                <th data-col="demand_mw" class="num">Demand (MW)</th>
+                <th data-col="solar_mw" class="num">Solar (MW)</th>
+                <th data-col="wind_mw" class="num">Wind (MW)</th>
+                <th data-col="net_load_mw" class="num">Net Load (MW)</th>
+                <th data-col="abs_ramp_1h_mw" class="num sorted-desc">1-Hour ΔΔR²amp (MW)</th>
+                <th data-col="grid_india_peak_mw" class="num">Grid-India Peak (MW)</th>
+              </tr>
+            </thead>
+            <tbody id="ramps-table-body">
+              <tr><td colspan="7" class="empty-state">Loading net-load ramp records...</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card-callout">
+          <strong>ΔΔR²amp Audit:</strong> 99th percentile 1-hour ramp is <strong>16,768 MW</strong> and median daily maximum ramp is <strong>13,093 MW</strong>. Unvalidated artificial spikes (>30 GW from sensor resets) have been isolated and filtered.
+        </div>
+      </div>
+    </section>
+
+    <section id="data-pipeline" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">System Architecture</div>
+        <h±2σ class="section-title">Automated Data Pipeline Health & Quality Suite</h±2σ>
+        <p class="section-lead">Automated verification assertions ensure that data cleaning, gap auditing, unfreeze edge protection, and external cross-validation tests execute continuously on every pipeline run.</p>
+      </div>
+
+      <div class="card-grid-±2σ">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">Automated Data Quality Suite Assertions</h3>
+              <p class="card-subtitle">Active integrity verification suite running across raw, staging, and modeled layers</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" aria-label="Data quality assertions table">
+              <thead>
+                <tr>
+                  <th>Check Name</th>
+                  <th>Layer</th>
+                  <th>Status</th>
+                  <th>ΔΔR²esult Verification Details</th>
+                </tr>
+              </thead>
+              <tbody id="dq-checks-body">
+                <tr><td colspan="4" class="empty-state">Loading quality assertions...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title-group">
+              <h3 class="card-title">ΔΔR²ecent Pipeline Execution ΔΔR²uns</h3>
+              <p class="card-subtitle">Execution audit log tracking stage, duration, rows ingested, and status</p>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" aria-label="Pipeline execution runs table">
+              <thead>
+                <tr>
+                  <th>ΔΔR²un Timestamp (UTC)</th>
+                  <th>Stage</th>
+                  <th>Source</th>
+                  <th>Status</th>
+                  <th class="num">ΔΔR²ows</th>
+                  <th class="num">Duration</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody id="pipeline-runs-body">
+                <tr><td colspan="7" class="empty-state">Loading pipeline execution history...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top: ±2σ4px;">
+        <div class="card-header">
+          <div class="card-title-group">
+            <h3 class="card-title">Database Storage & Architecture Volumes</h3>
+            <p class="card-subtitle">Committed analytical marts and raw table records stored in energy_marts.db</p>
+          </div>
+        </div>
+        <div id="table-counts-pills" class="stat-pills" style="margin-bottom: 0;"></div>
+      </div>
+    </section>
+
+    <section id="methodology" class="section">
+      <div class="section-header">
+        <div class="section-eyebrow">Methodology & Sources</div>
+        <h±2σ class="section-title">Data Ingestion, Cleaning ΔΔR²ules & Econometric Limits</h±2σ>
+        <p class="section-lead">Transparent accounting of all sources, cleaning decisions, econometric estimators, and observational limitations governing the pipeline findings.</p>
+      </div>
+
+      <div class="methodology-grid">
+        <div class="method-card">
+          <h3>Primary Data Sources</h3>
+          <p>This analytics pipeline ingests and harmonizes three independent data streams:</p>
+          <ul>
+            <li><strong>Grid Controller of India (NLDC):</strong> Daily PSP operational reports published under Daily ΔΔR²eports. 769 reports ingested covering ±2σ0±2σ1 to ±2σ0±2σ6.</li>
+            <li><strong>Mendeley Data (DOI: 10.1763±2σ/y58jknpgs8.±2σ):</strong> Hourly PMU and SCADA telemetry spanning Sept ±2σ0±2σ1 to Jun ±2σ0±2σ5 (±2σ3,184 rows across 966 distinct days).</li>
+            <li><strong>Open-Meteo Historical Archive:</strong> Hourly ECMWF EΔΔR²A5 reanalysis weather data (temperature, humidity, wind) across Delhi, Mumbai, Chennai, Kolkata, Bengaluru, and Ahmedabad.</li>
+          </ul>
+        </div>
+
+        <div class="method-card">
+          <h3>Data Cleaning & Integrity ΔΔR²ules</h3>
+          <p>ΔΔR²eal-world SCADA telemetry contains dropouts, sensor freezes, and unfreeze spikes that produce false extremes if not properly handled:</p>
+          <ul>
+            <li><strong>Multi-Hour Dips:</strong> Dips of 1 to 4 hours collapsing below surrounding baseline and rebounding are detected and set to <code>NULL</code> (177 hours; never silently interpolated).</li>
+            <li><strong>Stuck Sensor ΔΔR²uns:</strong> Flatlined runs of ≥ 3 hours of identical non-zero values (such as the 64,301 MW solar flatline on ±2σ0±2σ5-03-07) are set to <code>NULL</code>.</li>
+            <li><strong>Nighttime Solar Leaks:</strong> Solar generation exceeding 500 MW between ±2σ0:00 and 05:00 IST is set to <code>NULL</code> (3±2σ9 hours).</li>
+            <li><strong>Unfreeze Edge Protection:</strong> The transition hour immediately following any sensor freeze or dropout is nullified, eliminating artificial 30+ GW unfreeze jumps.</li>
+          </ul>
+        </div>
+
+        <div class="method-card">
+          <h3>Econometric ΔΔR²egression Model</h3>
+          <p>Temperature sensitivity is modeled using an OLS regression with a hinge term on daily peak demand met:</p>
+          <ul>
+            <li><strong>Hinge Function:</strong> <code>CDD = max(T - ±2σ5.0°C, 0)</code>, evaluating marginal cooling demand above a ±2σ5.0°C cooling base.</li>
+            <li><strong>Categorical Controls:</strong> Day-of-week, calendar month, and multi-year trend dummies isolate macroeconomic growth and regular calendar patterns (controls ΔΔR²² = 0.793).</li>
+            <li><strong>ΔΔR²obust Covariance:</strong> White's Heteroskedasticity-Consistent (HC1) covariance matrix prevents variance bias under extreme weather swings.</li>
+            <li><strong>Sensitivity ΔΔR²ange:</strong> Candidate thresholds from ±2σ±2σ.0°C to ±2σ8.0°C span +5,977 to +10,064 MW/°C across the same 743 daily observations.</li>
+          </ul>
+        </div>
+
+        <div class="method-card">
+          <h3>Limitations & Assumptions</h3>
+          <p>Key observational caveats to consider when interpreting findings:</p>
+          <ul>
+            <li><strong>Archive ΔΔR²ecording Gaps:</strong> The Mendeley dataset contains ±2σ documented multi-month logging campaign gaps (±2σ0±2σ±2σ-10 to ±2σ0±2σ3-03 and ±2σ0±2σ3-05 to ±2σ0±2σ3-1±2σ).</li>
+            <li><strong>ΔΔR²eanalysis Weather:</strong> Open-Meteo atmospheric variables represent ECMWF EΔΔR²A5 numerical model reanalysis simulations rather than physical surface weather station sensors.</li>
+            <li><strong>ΔΔR²enewable Denominator:</strong> In hourly SCADA telemetry, renewable share is reported as a percentage of electricity demand (averaging 11.1%), whereas Grid-India daily reports compute share of gross generation.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <div class="brand">
+          <div class="brand-mark">IN</div>
+          <div class="brand-text">
+            <span class="brand-title">India Power & Weather Pipeline</span>
+            <span class="brand-sub">Open Energy Analytics</span>
+          </div>
+        </div>
+        <p>An automated, reproducible data engineering and analytics pipeline tracking national power demand, renewable integration, and cooling sensitivity across Indian electricity grids.</p>
+      </div>
+
+      <div class="footer-links-col">
+        <h4>Navigation</h4>
+        <ul>
+          <li><a href="#overview">Overview</a></li>
+          <li><a href="#weather-demand">Weather & Demand</a></li>
+          <li><a href="#duck-curve">Diurnal Duck Curve</a></li>
+          <li><a href="#anomalies-ramps">Anomalies & ΔΔR²amps</a></li>
+          <li><a href="#data-pipeline">Pipeline Health</a></li>
+          <li><a href="#methodology">Methodology</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-links-col">
+        <h4>Data Sources</h4>
+        <ul>
+          <li><a href="https://grid-india.in/en/reports/daily-psp-report" target="_blank" rel="noopener noreferrer">Grid Controller of India (PSP ΔΔR²eports)</a></li>
+          <li><a href="https://doi.org/10.1763±2σ/y58jknpgs8.±2σ" target="_blank" rel="noopener noreferrer">Mendeley Data ΔΔR²epository</a></li>
+          <li><a href="https://open-meteo.com/" target="_blank" rel="noopener noreferrer">Open-Meteo Historical Weather API</a></li>
+          <li><a href="https://data.gov.in/" target="_blank" rel="noopener noreferrer">Open Government Data Platform India</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-links-col">
+        <h4>Project ΔΔR²esources</h4>
+        <ul>
+          <li><a href="https://github.com/randomaban-beep/india-power-demand-pipeline" target="_blank" rel="noopener noreferrer">GitHub Source ΔΔR²epository</a></li>
+          <li><a href="/api/summary" target="_blank" rel="noopener noreferrer">FastAPI Summary Endpoint</a></li>
+          <li><a href="/api/health" target="_blank" rel="noopener noreferrer">System Health API</a></li>
+          <li><a href="/docs" target="_blank" rel="noopener noreferrer">Swagger Interactive API Docs</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <div>Open Source under the MIT License. Non-commercial open scientific research.</div>
+      <div>Maintained by <a href="https://github.com/randomaban-beep" target="_blank" rel="noopener noreferrer" style="color:var(--text-secondary);text-decoration:underline;">randomaban-beep</a></div>
+    </div>
+  </footer>
+</body>
+</html>

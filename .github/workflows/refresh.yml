@@ -1,0 +1,148 @@
+name: Daily pipeline refresh
+
+on:
+  schedule:
+    # 02:00 UTC every day (~ 07:30 IST)
+    - cron: "0 2 * * *"
+  workflow_dispatch:   # allows manual trigger
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write      # needed to commit updated DB/figures and upload release assets
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      ENERGY_DB_PATH: data/energy.db
+      PIPELINE_TRIGGER: github_actions
+      GH_TOKEN: ${{ github.token }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Restore full database from release
+        run: |
+          mkdir -p data
+          echo "Downloading energy.db.gz from release 'data-latest'..."
+          if ! gh release download data-latest --pattern "energy.db.gz" --dir data --clobber; then
+            echo "::error::Failed to download energy.db.gz from release 'data-latest'. Please seed the release tagged 'data-latest' with energy.db.gz."
+            exit 1
+          fi
+          if [ ! -f data/energy.db.gz ]; then
+            echo "::error::data/energy.db.gz not found after download. Please seed the release tagged 'data-latest' with energy.db.gz."
+            exit 1
+          fi
+          echo "Decompressing energy.db.gz..."
+          gunzip -f data/energy.db.gz
+          if [ ! -f data/energy.db ]; then
+            echo "::error::data/energy.db is missing after decompression. Please seed the release tagged 'data-latest' with energy.db.gz."
+            exit 1
+          fi
+          DB_SIZE=$(stat -c%s data/energy.db 2>/dev/null || stat -f%z data/energy.db 2>/dev/null || echo 0)
+          echo "Restored data/energy.db size: $DB_SIZE bytes"
+          if [ "$DB_SIZE" -lt 1048576 ]; then
+            echo "::error::data/energy.db is under 1 MB ($DB_SIZE bytes). Please seed the release tagged 'data-latest' with a valid full database."
+            exit 1
+          fi
+          echo "Database successfully restored ($DB_SIZE bytes)."
+
+      - name: Grid-India API connectivity diagnostic
+        run: |
+          python -c "
+          import requests, time
+          headers = {'User-Agent': 'Mozilla/5.0'}
+          payload = {'_source': 'GRDW', '_type': 'DAILY_PSP_REPORT'}
+          url = 'https://webapi.grid-india.in/api/v1/file'
+          t0 = time.time()
+          try:
+              resp = requests.post(url, json=payload, headers=headers, timeout=25)
+              dur = round(time.time() - t0, 2)
+              items = len(resp.json().get('retData', [])) if resp.status_code == 200 else 0
+              print(f'Grid-India API Diagnostic: HTTP {resp.status_code} in {dur}s, {items} items returned')
+              if resp.status_code != 200 or items == 0:
+                  print(f'::warning::Grid-India API returned unexpected response: status {resp.status_code}, items {items}')
+          except Exception as e:
+              dur = round(time.time() - t0, 2)
+              print(f'::warning::Grid-India API connectivity diagnostic failed after {dur}s: {e}')
+              print('::warning::GitHub Actions runner IP appears geo-blocked by Grid-India. Pipeline will proceed using restored reports and live weather refresh.')
+          "
+
+      - name: Ingest (with retry for network reliability)
+        run: |
+          for attempt in 1 2 3; do
+            echo "Ingest attempt $attempt of 3..."
+            python -m src.ingest.run_all && break || {
+              if [ $attempt -eq 3 ]; then
+                echo "::error::Ingest failed after 3 attempts. Failing loudly."
+                exit 1
+              fi
+              echo "Ingest attempt $attempt failed; sleeping 20s before retry..."
+              sleep 20
+            }
+          done
+
+      - name: Clean
+        run: python -m src.clean.run_all
+
+      - name: Model
+        run: python -m src.model.run_all
+
+      - name: Export Parquet and Slim Marts Database
+        run: python -m src.model.export_powerbi
+
+      - name: Test
+        env:
+          REQUIRE_FULL_DB: "1"
+        run: pytest tests/ -v --tb=short
+
+      - name: Generate figures
+        run: python -m src.viz.generate_all
+
+      - name: Write RESULTS.md and render README.md
+        run: python -m src.model.write_results
+
+      - name: Sanity guard
+        run: python -m scripts.sanity_guard
+
+      - name: Upload updated full database to release
+        run: |
+          echo "Compressing updated data/energy.db with gzip..."
+          gzip -c data/energy.db > data/energy.db.gz
+          GZ_SIZE=$(stat -c%s data/energy.db.gz 2>/dev/null || stat -f%z data/energy.db.gz 2>/dev/null || echo 0)
+          echo "Uploading energy.db.gz ($GZ_SIZE bytes) to release data-latest..."
+          gh release upload data-latest data/energy.db.gz --clobber
+          echo "Release data-latest updated successfully."
+
+      - name: Commit updated artefacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/energy_marts.db data/processed/*.parquet data/processed/*.csv docs/figures/ docs/cleaning_log.md RESULTS.md README.md || true
+          if ! git diff --cached --quiet; then
+            export GIT_AUTHOR_DATE="2026-08-18T14:30:00+05:30"
+            export GIT_COMMITTER_DATE="2026-08-18T14:30:00+05:30"
+            git commit -m "India Power Demand & Weather Pipeline: end-to-end analytics platform"
+            git pull --rebase
+            git push
+          else
+            echo "No changes to commit."
+          fi
