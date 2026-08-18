@@ -1,0 +1,89 @@
+name: Daily pipeline refresh
+
+on:
+  schedule:
+    # 02:00 UTC every day (~ 07:30 IST)
+    - cron: "0 2 * * *"
+  workflow_dispatch:   # allows manual trigger
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: write      # needed to commit updated DB + figures
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── Pipeline stages ──────────────────────────────────────────────────
+      - name: Ingest (with retry for network reliability)
+        env:
+          PIPELINE_TRIGGER: github_actions
+          DATA_GOV_IN_API_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: |
+          for attempt in 1 2 3; do
+            echo "Ingest attempt $attempt of 3..."
+            python -m src.ingest.run_all && break || {
+              if [ $attempt -eq 3 ]; then
+                echo "::error::Grid-India or weather ingest failed after 3 attempts. Failing loudly."
+                exit 1
+              fi
+              echo "Ingest attempt $attempt failed; sleeping 20s before retry..."
+              sleep 20
+            }
+          done
+
+      - name: Clean
+        env:
+          PIPELINE_TRIGGER: github_actions
+        run: python -m src.clean.run_all
+
+      - name: Model
+        env:
+          PIPELINE_TRIGGER: github_actions
+        run: python -m src.model.run_all
+
+      - name: Export Parquet and Slim Marts Database
+        env:
+          PIPELINE_TRIGGER: github_actions
+        run: python -m src.model.export_powerbi
+
+      - name: Test
+        run: pytest tests/ -v --tb=short
+
+      - name: Generate figures
+        run: python -m src.viz.generate_all
+
+      - name: Write RESULTS.md and render README.md
+        env:
+          PIPELINE_TRIGGER: github_actions
+        run: python -m src.model.write_results
+
+      # ── Commit artefacts back to repo ────────────────────────────────────
+      - name: Commit updated artefacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/energy_marts.db data/processed/*.parquet docs/figures/ docs/cleaning_log.md RESULTS.md README.md || true
+          git diff --cached --quiet || git commit -m "chore: scheduled pipeline refresh $(date -u +%Y-%m-%d)"
+          git push
