@@ -6,6 +6,10 @@ on:
     - cron: "0 2 * * *"
   workflow_dispatch:   # allows manual trigger
 
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
 permissions:
   contents: write      # needed to commit updated DB + figures
 
@@ -32,25 +36,47 @@ jobs:
           pip install -r requirements.txt
 
       # ── Pipeline stages ──────────────────────────────────────────────────
-      - name: Ingest
+      - name: Ingest (with retry for network reliability)
         env:
+          PIPELINE_TRIGGER: github_actions
           DATA_GOV_IN_API_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
-        run: python -m src.ingest.run_all
+        run: |
+          for attempt in 1 2 3; do
+            echo "Ingest attempt $attempt of 3..."
+            python -m src.ingest.run_all && break || {
+              if [ $attempt -eq 3 ]; then
+                echo "::error::Grid-India or weather ingest failed after 3 attempts. Failing loudly."
+                exit 1
+              fi
+              echo "Ingest attempt $attempt failed; sleeping 20s before retry..."
+              sleep 20
+            }
+          done
 
       - name: Clean
+        env:
+          PIPELINE_TRIGGER: github_actions
         run: python -m src.clean.run_all
 
       - name: Model
+        env:
+          PIPELINE_TRIGGER: github_actions
         run: python -m src.model.run_all
+
+      - name: Export Parquet and Slim Marts Database
+        env:
+          PIPELINE_TRIGGER: github_actions
+        run: python -m src.model.export_powerbi
 
       - name: Test
         run: pytest tests/ -v --tb=short
-        # Fail the whole workflow if any test fails
 
       - name: Generate figures
         run: python -m src.viz.generate_all
 
-      - name: Write RESULTS.md
+      - name: Write RESULTS.md and render README.md
+        env:
+          PIPELINE_TRIGGER: github_actions
         run: python -m src.model.write_results
 
       # ── Commit artefacts back to repo ────────────────────────────────────
@@ -58,6 +84,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/energy.db docs/figures/ RESULTS.md || true
+          git add data/energy_marts.db data/processed/*.parquet docs/figures/ docs/cleaning_log.md RESULTS.md README.md || true
           git diff --cached --quiet || git commit -m "chore: scheduled pipeline refresh $(date -u +%Y-%m-%d)"
           git push

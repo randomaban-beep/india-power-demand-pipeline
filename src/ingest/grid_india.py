@@ -6,9 +6,13 @@ and loads into raw_daily_psp and raw_state_psp tables in energy.db.
 
 from __future__ import annotations
 
+import concurrent.futures
 import datetime as dt
+import io
 from pathlib import Path
+import re
 from typing import Any
+import pdfplumber
 import requests
 import xlrd
 from sqlalchemy import text
@@ -78,12 +82,21 @@ def fetch_file_catalog(limit: int = 30) -> list[dict[str, Any]]:
         return []
 
 
-def parse_mop_e_sheet(xls_path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Extract all-India daily metrics and state breakdown from MOP_E sheet."""
-    wb = xlrd.open_workbook(str(xls_path))
-    sheet = wb.sheet_by_name("MOP_E")
+    if isinstance(xls_input, bytes):
+        wb = xlrd.open_workbook(file_contents=xls_input)
+        fname = ""
+    else:
+        wb = xlrd.open_workbook(str(xls_input))
+        fname = xls_input.stem
     
-    # 1. Extract report date
+    sheet_names = [s.lower() for s in wb.sheet_names()]
+    if "mop_e" in sheet_names:
+        idx = sheet_names.index("mop_e")
+        sheet = wb.sheet_by_index(idx)
+    else:
+        sheet = wb.sheet_by_index(0)
     report_date_str = ""
     for r in range(min(5, sheet.nrows)):
         for c in range(sheet.ncols):
@@ -208,6 +221,192 @@ def parse_mop_e_sheet(xls_path: Path) -> tuple[dict[str, Any], list[dict[str, An
                 })
 
     return all_india, states
+
+
+def parse_pdf_psp(pdf_content: bytes, filename: str = "") -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Extract all-India daily metrics from PDF PSP report."""
+    try:
+        pdf = pdfplumber.open(io.BytesIO(pdf_content))
+    except Exception as e:
+        log.warning("Could not open PDF: %s", e)
+        return {}, []
+
+    if len(pdf.pages) < 2:
+        return {}, []
+
+    txt = pdf.pages[1].extract_text() or ""
+    dt_m = re.search(r"Date of Reporting:\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4})", txt)
+    report_iso_date = ""
+    if dt_m:
+        try:
+            rep_d = dt.datetime.strptime(dt_m.group(1), "%d-%b-%Y").date()
+            report_iso_date = (rep_d - dt.timedelta(days=1)).isoformat()
+        except Exception:
+            pass
+
+    if not report_iso_date and filename:
+        parts = filename.split("_")[0].split(".")
+        if len(parts) == 3:
+            try:
+                day, month, yr = int(parts[0]), int(parts[1]), int(parts[2])
+                full_yr = 2000 + yr if yr < 100 else yr
+                report_iso_date = f"{full_yr:04d}-{month:02d}-{day:02d}"
+            except Exception:
+                pass
+
+    if not report_iso_date:
+        return {}, []
+
+    def get_num(pat: str) -> float | None:
+        m = re.search(pat, txt, re.MULTILINE)
+        if m:
+            try:
+                return float(m.group(1).replace(",", ""))
+            except ValueError:
+                return None
+        return None
+
+    all_india: dict[str, Any] = {
+        "report_date": report_iso_date,
+        "evening_peak_mw": get_num(r"Demand Met during Evening Peak.*?\s+([0-9,]+)\s*$"),
+        "evening_peak_shortage_mw": get_num(r"Peak Shortage \(MW\).*?\s+([0-9,.]+)\s*$"),
+        "energy_met_mu": get_num(r"Energy Met \(MU\).*?\s+([0-9,.]+)\s*$"),
+        "hydro_gen_mu": get_num(r"Hydro Gen \(MU\).*?\s+([0-9,.]+)\s*$"),
+        "wind_gen_mu": get_num(r"Wind Gen \(MU\).*?\s+([0-9,.]+)\s*$"),
+        "solar_gen_mu": get_num(r"Solar Gen \(MU\)\*?.*?\s+([0-9,.]+)\s*$"),
+        "energy_shortage_mu": get_num(r"Energy Shortage \(MU\).*?\s+([0-9,.]+)\s*$"),
+        "max_demand_met_mw": get_num(r"Maximum Demand Met During the Day.*?\s+([0-9,]+)\s*$"),
+        "max_demand_time": None,
+        "coal_gen_mu": None,
+        "lignite_gen_mu": None,
+        "nuclear_gen_mu": None,
+        "gas_gen_mu": None,
+        "res_gen_mu": None,
+        "total_gen_mu": None,
+    }
+
+    return all_india, []
+
+
+def backfill_daily_psp(limit_total: int = 500, max_workers: int = 8) -> tuple[int, int]:
+    """Backfill historical daily PSP reports across all available years (2021 to 2026)."""
+    init_db()
+    create_raw_tables()
+    engine = get_engine()
+
+    catalog = fetch_file_catalog(limit=7000)
+    if not catalog:
+        log.warning("No files retrieved from catalog for backfill.")
+        return 0, 0
+
+    valid_years = {"2021-22", "2022-23", "2023-24", "2024-25", "2025-26", "2026-27"}
+    filtered = [item for item in catalog if item.get("PeriodYear") in valid_years]
+
+    date_to_file: dict[str, dict[str, Any]] = {}
+    for item in filtered:
+        title = item.get("Title_", "")
+        date_key = title.split("_")[0]
+        if not date_key:
+            continue
+        mime = str(item.get("MimeType", ""))
+        filepath = str(item.get("FilePath", ""))
+        is_xls = "excel" in mime or filepath.endswith(".xls") or filepath.endswith(".xlsx")
+        if date_key not in date_to_file:
+            date_to_file[date_key] = item
+        elif is_xls:
+            date_to_file[date_key] = item
+
+    items_to_process = list(date_to_file.values())
+    if len(items_to_process) > limit_total:
+        step = max(1, len(items_to_process) // limit_total)
+        items_to_process = items_to_process[::step][:limit_total]
+
+    log.info("Selected %d daily PSP files to backfill across %s", len(items_to_process), sorted(list(valid_years)))
+
+    session = requests.Session()
+    headers = {"User-Agent": "Mozilla/5.0"}
+
+    def fetch_and_parse(item: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        rel_path = item.get("FilePath", "")
+        if not rel_path:
+            return {}, []
+        url = f"{CDN_BASE}/{rel_path}"
+        try:
+            r = session.get(url, headers=headers, timeout=25)
+            if r.status_code != 200:
+                return {}, []
+            content = r.content
+            if rel_path.endswith(".xls") or "excel" in str(item.get("MimeType", "")):
+                return parse_mop_e_sheet(content)
+            elif rel_path.endswith(".pdf") or "pdf" in str(item.get("MimeType", "")):
+                return parse_pdf_psp(content, filename=item.get("Title_", ""))
+        except Exception as e:
+            log.debug("Error downloading %s: %s", rel_path, e)
+        return {}, []
+
+    total_daily = 0
+    total_states = 0
+    now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        results = executor.map(fetch_and_parse, items_to_process)
+        default_fields = {
+            "report_date": None, "evening_peak_mw": None, "evening_peak_shortage_mw": None, "energy_met_mu": None,
+            "hydro_gen_mu": None, "wind_gen_mu": None, "solar_gen_mu": None, "energy_shortage_mu": None,
+            "max_demand_met_mw": None, "max_demand_time": None, "coal_gen_mu": None, "lignite_gen_mu": None,
+            "nuclear_gen_mu": None, "gas_gen_mu": None, "res_gen_mu": None, "total_gen_mu": None
+        }
+        for all_india, states in results:
+            rep_date = all_india.get("report_date")
+            if not rep_date or not all_india.get("max_demand_met_mw"):
+                continue
+            record = {**default_fields, **all_india, "ingested_at": now_iso}
+            with engine.connect() as conn:
+                conn.execute(text("""
+                    INSERT INTO raw_daily_psp (
+                        report_date, evening_peak_mw, evening_peak_shortage_mw, energy_met_mu,
+                        hydro_gen_mu, wind_gen_mu, solar_gen_mu, energy_shortage_mu,
+                        max_demand_met_mw, max_demand_time, coal_gen_mu, lignite_gen_mu,
+                        nuclear_gen_mu, gas_gen_mu, res_gen_mu, total_gen_mu, ingested_at
+                    ) VALUES (
+                        :report_date, :evening_peak_mw, :evening_peak_shortage_mw, :energy_met_mu,
+                        :hydro_gen_mu, :wind_gen_mu, :solar_gen_mu, :energy_shortage_mu,
+                        :max_demand_met_mw, :max_demand_time, :coal_gen_mu, :lignite_gen_mu,
+                        :nuclear_gen_mu, :gas_gen_mu, :res_gen_mu, :total_gen_mu, :ingested_at
+                    )
+                    ON CONFLICT(report_date) DO UPDATE SET
+                        evening_peak_mw=COALESCE(excluded.evening_peak_mw, raw_daily_psp.evening_peak_mw),
+                        evening_peak_shortage_mw=COALESCE(excluded.evening_peak_shortage_mw, raw_daily_psp.evening_peak_shortage_mw),
+                        energy_met_mu=COALESCE(excluded.energy_met_mu, raw_daily_psp.energy_met_mu),
+                        hydro_gen_mu=COALESCE(excluded.hydro_gen_mu, raw_daily_psp.hydro_gen_mu),
+                        wind_gen_mu=COALESCE(excluded.wind_gen_mu, raw_daily_psp.wind_gen_mu),
+                        solar_gen_mu=COALESCE(excluded.solar_gen_mu, raw_daily_psp.solar_gen_mu),
+                        energy_shortage_mu=COALESCE(excluded.energy_shortage_mu, raw_daily_psp.energy_shortage_mu),
+                        max_demand_met_mw=COALESCE(excluded.max_demand_met_mw, raw_daily_psp.max_demand_met_mw),
+                        ingested_at=excluded.ingested_at;
+                """), record)
+                for s in states:
+                    conn.execute(text("""
+                        INSERT INTO raw_state_psp (
+                            report_date, region, state, max_demand_mw, shortage_mw,
+                            energy_met_mu, energy_shortage_mu, ingested_at
+                        ) VALUES (
+                            :report_date, :region, :state, :max_demand_mw, :shortage_mw,
+                            :energy_met_mu, :energy_shortage_mu, :ingested_at
+                        )
+                        ON CONFLICT(report_date, region, state) DO UPDATE SET
+                            max_demand_mw=excluded.max_demand_mw,
+                            shortage_mw=excluded.shortage_mw,
+                            energy_met_mu=excluded.energy_met_mu,
+                            energy_shortage_mu=excluded.energy_shortage_mu,
+                            ingested_at=excluded.ingested_at;
+                    """), {**s, "ingested_at": now_iso})
+                conn.commit()
+                total_daily += 1
+                total_states += len(states)
+
+    log.info("Grid-India backfill complete: %d daily rows, %d state rows inserted/updated", total_daily, total_states)
+    return total_daily, total_states
 
 
 def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:

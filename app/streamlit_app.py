@@ -82,25 +82,42 @@ tab_overview, tab_weather, tab_re, tab_anom, tab_health = st.tabs([
 # TAB 1: OVERVIEW
 # ==============================================================================
 with tab_overview:
-    # Query latest KPIs
-    kpi_query = """
+    # Query latest KPIs dynamically from newest daily data (stg_daily_psp)
+    latest_psp_df = pd.read_sql("""
         SELECT 
-            MAX(date_ist) as latest_date,
-            ROUND(AVG(demand_mw), 0) as avg_demand,
-            MAX(demand_mw) as peak_demand,
-            ROUND(AVG(solar_mw + wind_mw) / AVG(demand_mw) * 100.0, 1) as re_share
-        FROM stg_hourly_demand
-    """
-    kpis = pd.read_sql(kpi_query, conn).iloc[0]
+            report_date as latest_date,
+            max_demand_met_mw as latest_peak,
+            evening_peak_mw as latest_evening_peak,
+            energy_met_mu as latest_energy_met,
+            res_share_pct as latest_re_share
+        FROM stg_daily_psp 
+        ORDER BY report_date DESC LIMIT 1
+    """, conn)
+    
+    if not latest_psp_df.empty:
+        latest_psp = latest_psp_df.iloc[0]
+        latest_date = latest_psp['latest_date']
+        latest_peak = int(latest_psp['latest_peak']) if pd.notnull(latest_psp['latest_peak']) else 0
+        latest_re = f"{latest_psp['latest_re_share']:.1f}%" if pd.notnull(latest_psp['latest_re_share']) else "N/A"
+    else:
+        latest_date = "N/A"
+        latest_peak = 0
+        latest_re = "N/A"
+
+    all_time_peak = conn.execute(
+        "SELECT MAX(max_demand_met_mw), report_date FROM stg_daily_psp WHERE max_demand_met_mw IS NOT NULL"
+    ).fetchone()
+    all_time_val = int(all_time_peak[0]) if all_time_peak and all_time_peak[0] else latest_peak
+    all_time_dt = all_time_peak[1] if all_time_peak and all_time_peak[1] else latest_date
     
     last_run_time = conn.execute(
         "SELECT MAX(run_at) FROM pipeline_runs WHERE status = 'ok'"
     ).fetchone()[0] or "N/A"
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("All-Time Peak Demand", f"{int(kpis['peak_demand']):,} MW", "Historical Peak")
-    col2.metric("Average Grid Load", f"{int(kpis['avg_demand']):,} MW", "Diurnal Baseline")
-    col3.metric("Renewable Share", f"{kpis['re_share']}%", "Solar + Wind Penetration")
+    col1.metric(f"Latest Daily Peak ({latest_date})", f"{latest_peak:,} MW", "From Daily PSP")
+    col2.metric("All-Time Grid Peak", f"{all_time_val:,} MW", f"Recorded {all_time_dt}")
+    col3.metric("Latest Renewable Share", latest_re, "Solar + Wind")
     col4.metric("Pipeline Freshness", str(last_run_time)[:16].replace("T", " "), "Daily CI Active")
 
     st.divider()
@@ -165,7 +182,17 @@ with tab_overview:
 # ==============================================================================
 with tab_weather:
     st.subheader("Temperature vs Electricity Demand Sensitivity")
-    st.markdown("Assess how cooling load drives power demand above the 25°C threshold.")
+    st.markdown("Assess how cooling load drives power demand above the 25°C balance point.")
+
+    # Controlled sensitivity call
+    from src.model.temperature_sensitivity import compute_temperature_sensitivity
+    sens = compute_temperature_sensitivity(conn)
+    
+    col_k1, col_k2, col_k3, col_k4 = st.columns(4)
+    col_k1.metric("Controlled Slope (>25°C)", f"+{sens['slope_mw_per_c']:,} MW / °C", "Daily OLS Model")
+    col_k2.metric("95% Confidence Interval", f"[{sens['ci_lower']:,}, {sens['ci_upper']:,}]", "MW / °C")
+    col_k3.metric("Model R-squared", f"{sens['r2']:.2f}", f"N = {sens['n_days']} Days")
+    col_k4.metric("Threshold Balance Point", f"{sens['threshold_choice_c']}°C", "Justified via AIC")
 
     city_col = st.selectbox(
         "Select Temperature Feature",
@@ -313,14 +340,14 @@ with tab_health:
             SELECT check_name, status, details, checked_at
             FROM data_quality_checks
             ORDER BY id DESC
-            LIMIT 5
+            LIMIT 7
         """, conn)
         st.dataframe(df_checks, use_container_width=True)
 
     with col_h2:
         st.markdown("**Recent Pipeline Execution Runs**")
         df_runs = pd.read_sql("""
-            SELECT run_at, stage, source, rows_inserted, duration_s, status, message
+            SELECT run_at, stage, source, rows_inserted, duration_s, status, trigger, message
             FROM pipeline_runs
             ORDER BY id DESC
             LIMIT 6

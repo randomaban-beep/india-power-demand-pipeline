@@ -20,9 +20,22 @@ def test_staging_tables_populated() -> None:
         assert p_count > 0, "stg_daily_psp is empty"
 
 
-def test_data_quality_suite_all_pass() -> None:
-    """Verify that all 5 automated data quality checks pass."""
+def test_data_quality_suite_results() -> None:
+    """Verify that automated data quality assertions pass and gap audit flags historical gaps."""
     res = run_checks()
-    assert res["total_checks"] == 5
-    assert res["failed"] == 0, f"Expected 0 failures, got {res['failed']}: {res['results']}"
-    assert res["passed"] == 5
+    assert res["total_checks"] == 7
+    # 6 assertions pass, 1 gap audit check accurately flags the 2 historical gaps
+    assert res["passed"] == 6
+    assert res["failed"] == 1
+    assert res["gap_summary"]["total_gaps"] == 2
+    assert res["gap_summary"]["longest_gap_hours"] > 4000
+
+
+def test_sensor_dropouts_isolated() -> None:
+    """Verify that all detected sensor dropout hours have demand_mw set to NULL."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        dropouts_count = conn.execute(text("SELECT COUNT(*) FROM stg_hourly_demand WHERE is_dropout = 1")).scalar()
+        assert dropouts_count > 0, "Expected at least 1 sensor dropout to be flagged"
+        unisolated = conn.execute(text("SELECT COUNT(*) FROM stg_hourly_demand WHERE is_dropout = 1 AND demand_mw IS NOT NULL")).scalar()
+        assert unisolated == 0, f"Found {unisolated} dropouts with non-NULL demand_mw!"

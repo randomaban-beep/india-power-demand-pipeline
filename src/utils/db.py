@@ -6,6 +6,7 @@ and the rest of the code stays the same.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -36,6 +37,11 @@ def get_connection(db_path: Path = DB_PATH) -> Generator[sqlite3.Connection, Non
         conn.close()
 
 
+def get_trigger() -> str:
+    """Return 'github_actions' if running in CI/GitHub Actions, else 'local'."""
+    return os.getenv("PIPELINE_TRIGGER", "github_actions" if os.getenv("GITHUB_ACTIONS") == "true" else "local")
+
+
 def init_db(db_path: Path = DB_PATH) -> None:
     """Create the pipeline_runs audit table if it does not exist."""
     engine = get_engine(db_path)
@@ -51,7 +57,12 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 rows_skipped  INTEGER,
                 duration_s    REAL,
                 status        TEXT    NOT NULL,           -- ok|error
+                trigger       TEXT    NOT NULL DEFAULT 'local', -- local|github_actions
                 message       TEXT
             )
         """))
+        # Check if trigger column exists in existing table
+        cols = [r[1] for r in conn.execute(text("PRAGMA table_info(pipeline_runs)")).fetchall()]
+        if "trigger" not in cols:
+            conn.execute(text("ALTER TABLE pipeline_runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'local'"))
         conn.commit()

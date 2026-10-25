@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from src.clean.quality_checks import run_checks
 from src.utils.config import SQL_DIR
-from src.utils.db import get_engine, init_db
+from src.utils.db import get_connection, get_engine, get_trigger, init_db
 from src.utils.logging import get_logger
 
 log = get_logger(__name__)
@@ -17,14 +17,15 @@ log = get_logger(__name__)
 def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, duration_s: float, status: str, message: str) -> None:
     engine = get_engine()
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
+    trigger = get_trigger()
     with engine.connect() as conn:
         conn.execute(text("""
             INSERT INTO pipeline_runs (
                 run_at, stage, source, rows_fetched, rows_inserted,
-                rows_skipped, duration_s, status, message
+                rows_skipped, duration_s, status, trigger, message
             ) VALUES (
                 :run_at, :stage, :source, :rows_fetched, :rows_inserted,
-                0, :duration_s, :status, :message
+                0, :duration_s, :status, :trigger, :message
             )
         """), {
             "run_at": now_iso,
@@ -34,6 +35,7 @@ def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, dura
             "rows_inserted": rows_inserted,
             "duration_s": duration_s,
             "status": status,
+            "trigger": trigger,
             "message": message
         })
         conn.commit()
@@ -41,24 +43,17 @@ def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, dura
 
 def run_staging_sql() -> None:
     """Run all SQL files in sql/staging/ in order."""
-    engine = get_engine()
     staging_files = [
         "stg_hourly_demand.sql",
         "stg_hourly_weather.sql",
         "stg_daily_psp.sql",
     ]
-    
-    with engine.connect() as conn:
+    with get_connection() as conn:
         for fname in staging_files:
             fpath = SQL_DIR / "staging" / fname
             if fpath.exists():
                 sql_content = fpath.read_text(encoding="utf-8")
-                # Split statements by semicolon
-                for statement in sql_content.split(";"):
-                    stmt = statement.strip()
-                    if stmt:
-                        conn.execute(text(stmt))
-                conn.commit()
+                conn.executescript(sql_content)
                 log.info("Executed staging SQL: %s", fname)
 
 

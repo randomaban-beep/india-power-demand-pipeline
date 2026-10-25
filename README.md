@@ -5,35 +5,38 @@
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-brightgreen.svg)](https://www.python.org/)
 [![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](data/energy.db)
 
-An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables. Ingests daily reports and historical SCADA telemetry, cleans and models data in SQL, refreshes daily via GitHub Actions, and renders publication-ready visualisations and an interactive Streamlit dashboard.
+An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical SCADA telemetry, and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and an interactive Streamlit dashboard.
 
 ---
 
 ## ⚡ Executive Summary & Key Findings
 
+> **Note on Data Synchronization:** All figures and metrics below are generated dynamically from `data/energy.db` via `src/model/write_results.py` and are identical to [`RESULTS.md`](RESULTS.md).
+
 | Finding | Metric / Evidence | Strategic Takeaway ("So What") |
 |---|---|---|
-| **Temperature Elasticity** | **+3,723 MW / °C** above 25°C base | Every 1°C heatwave across Indian urban centers adds nearly 4 GW of instantaneous peak cooling demand. |
-| **Midday Solar Suppression** | **~24,000 MW** solar belly depth | Midday net load is significantly depressed, requiring steep generation ramp-downs followed by aggressive evening ramp-ups. |
-| **Grid Ramping Stress** | **31,732 MW** maximum 1-hour ramp | Solar sunset coinciding with evening peak requires over 31 GW of flexible ramping capacity (hydro, gas, battery storage). |
-| **Variable RE Penetration** | **11.4%** average (peaking at **27.6%**) | Growing solar and wind capacity is actively reshaping the diurnal load curve, making grid flexibility essential. |
-| **Pipeline Reliability** | **100%** assertion pass rate | Automated tests validate 0 timestamp gaps, 0 duplicates, and 100% weather join overlap on every daily refresh. |
+| **Controlled Temperature Elasticity** | **+8,189 MW / °C** above 25°C base (95% CI: [7,132, 9,246] MW/°C, $R^2=0.88$) | Every 1°C heatwave across Indian urban centers adds over 8 GW of instantaneous national peak cooling demand, controlling for weekday, month, and year trend. |
+| **Midday Solar Suppression** | **~46,124 MW** midday solar belly depth | Midday net load is significantly depressed during summer months, requiring steep thermal ramp-downs followed by aggressive evening ramp-ups. |
+| **Grid Ramping Stress** | **36,798 MW** maximum 1-hour ramp (99th percentile: **17,228 MW**) | Solar sunset coinciding with evening industrial and domestic peak requires flexible ramping capacity (hydro, pumped storage, gas, battery storage). |
+| **Renewable Penetration** | **11.3%** average daily generation (peaking at **33.5%**) | Solar and wind generation are actively reshaping the diurnal load curve across all five regional grids. |
+| **Peak Demand Benchmark** | **248,688 MW** in hourly window (2024-05-30) | All-time national peak demand met recorded in Grid-India daily reports reached **270,820 MW** (2026-05-21). |
+| **Data Quality & Integrity** | **24 dropouts nullified**; **2 historical gaps audited** | High-frequency telemetry contains 2 multi-month gaps in the historical archive; 24 sensor dropouts were isolated and nullified (never silently interpolated). |
 
 ---
 
 ## 📊 Core Visual Findings
 
-### 1. Diurnal Net Load Profile ("Duck Curve")
-Solar generation creates a deep midday depression in net load that swings sharply upward at sunset.
-![Net Load Profile](docs/figures/04_duck_curve.png)
-*Takeaway: Solar generation suppresses net load by ~24,000 MW during midday hours, demanding rapid ramping of dispatchable resources between 16:00 and 19:30 IST.*
+### 1. Daily Demand Growth and Seasonality
+Continuous time-series tracking daily average demand, 7-day rolling baseline, and dataset peak demand.
+![Daily Demand](docs/figures/01_daily_demand.png)
+*Takeaway: Demonstrates persistent summer peak escalation (reaching 248,688 MW in the hourly dataset and 270,820 MW in national daily reports) contrasted with winter base troughs (~104,310 MW).*
 
 ---
 
-### 2. Temperature Sensitivity of Electricity Demand
-Electricity demand demonstrates a pronounced hockey-stick hinge at 25°C.
+### 2. Controlled Temperature Sensitivity of Electricity Demand
+Daily peak demand regressed against multi-city daily mean temperature, with categorical controls for weekday, month, and year trend.
 ![Temperature vs Demand](docs/figures/02_temp_vs_demand.png)
-*Takeaway: Demand scales linearly by +3,723 MW per 1°C increase above 25°C, illustrating the massive cooling load driving summer grid strain.*
+*Takeaway: Daily peak demand expands at +8,189 MW/°C (95% CI: [7,132, 9,246] MW/°C, $R^2=0.88$, $N=272$ cooling days) above the 25.0°C cooling balance point.*
 
 ---
 
@@ -44,24 +47,45 @@ Heatmap of average hourly demand across hours of the day (IST) and calendar mont
 
 ---
 
-### 4. Hourly Net Load Ramp Distribution
-Histogram of hour-to-hour net load changes, showing tail ramping events.
+### 4. Diurnal Net Load Profile ("Duck Curve")
+Net load profile by season: gross demand, solar and wind generation, and net load.
+![Net Load Profile](docs/figures/04_duck_curve.png)
+*Takeaway: Midday solar generation suppresses net load by ~46,124 MW during peak summer solar hours, creating steep ramp requirements at dusk.*
+
+---
+
+### 5. Renewable Generation Share & Generation Mix
+Daily renewable energy share distribution and generation breakdown by technology.
+![Renewable Share](docs/figures/05_renewable_share.png)
+*Takeaway: Intermittent renewables account for an average of 11.3% of generation, reaching a recorded daily peak of 33.5%.*
+
+---
+
+### 6. Monthly Peak Demand Growth
+Year-over-year peak demand comparison across calendar months.
+![Monthly Peak Demand](docs/figures/06_peak_demand_by_month.png)
+*Takeaway: Quantifies steady year-on-year electrification growth and rising cooling intensity across peak summer seasons.*
+
+---
+
+### 7. Demand Anomaly Detection
+Identification of statistically anomalous grid demand days exceeding $\pm 2\sigma$ from same-season and same-weekday norms.
+![Anomaly Days](docs/figures/07_anomaly_days.png)
+*Takeaway: Identified 25 real demand anomaly days (e.g., severe heatwave days during April 2023) cleanly separated from data-quality sensor dropout days.*
+
+---
+
+### 8. Hourly Net Load Ramp Distribution
+Histogram of hour-to-hour net load changes computed strictly between consecutive non-glitch hours exactly 1 hour apart.
 ![Net Load Ramps](docs/figures/08_net_load_ramps.png)
-*Takeaway: 99th percentile 1-hour ramp exceeds 18,000 MW, with maximum recorded ramps surpassing 31,000 MW/h.*
+*Takeaway: Maximum clean 1-hour ramp is 36,798 MW (99th percentile: 17,228 MW). Sensor dropout glitches that previously reported fake 80,000+ MW ramps have been filtered and isolated.*
 
 ---
 
-### 5. Daily Demand Growth and Seasonality
-Continuous time-series with 7-day rolling average and all-time peak load annotation.
-![Daily Demand](docs/figures/01_daily_demand.png)
-*Takeaway: Strong seasonal swing between winter troughs (~130,000 MW) and summer peaks (~218,000 MW).*
-
----
-
-### 6. Pipeline Reliability and Data Completeness
-Data quality monitoring verifying zero duplicates, plausible ranges, and cross-layer integrity.
+### 9. Pipeline Reliability and Data Completeness
+Automated data quality assertion suite, records per architectural layer, and gap audit summary.
 ![Data Quality](docs/figures/09_data_quality.png)
-*Takeaway: 100% automated pass rate across all staging assertions ensures audit-grade data delivery.*
+*Takeaway: 6 of 7 automated assertion checks pass. The 2 historical multi-month gaps in the Mendeley dataset (longest: 5,881h) and 24 sensor dropouts are audited and reported with complete transparency.*
 
 ---
 
@@ -98,8 +122,9 @@ Data quality monitoring verifying zero duplicates, plausible ranges, and cross-l
      ┌─────────────────────────────────────────────────────────┐
      │                     MODELED MARTS                       │
      │  mart_temp_vs_demand        mart_net_load_profile       │
-     │  mart_net_load_ramps        mart_monthly_peak_demand    │
-     │  mart_anomaly_days          mart_demand_profile_by_season
+     │  mart_daily_weather_demand  mart_monthly_peak_demand    │
+     │  mart_net_load_ramps        mart_demand_profile_by_season
+     │  mart_anomaly_days                                      │
      └───────────────────────────┬─────────────────────────────┘
                                  │
                     ┌────────────┴────────────┐
@@ -114,13 +139,14 @@ Data quality monitoring verifying zero duplicates, plausible ranges, and cross-l
 
 ## 💾 Data Sources & Licenses
 
-| Source | Description | License / Terms |
-|---|---|---|
-| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | Public government data |
-| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | 5-minute SCADA telemetry for demand, solar, and wind generation | CC BY 4.0 |
-| [Open-Meteo Historical Archive API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind | Free for non-commercial use |
+| Source | Description | Coverage Span | License / Terms |
+|---|---|---|---|
+| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | 2021-05-07 to 2026-10-23 (408 reports) | Public Indian government data |
+| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated SCADA telemetry for demand, solar, and wind generation | 2021-09-01 to 2025-06-24 (23,184 hours; 2 multi-month gaps) | CC BY 4.0 (Attribution 4.0 International) |
+| [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
 
-> *Note on Weather Data:* Open-Meteo utilizes ECMWF ERA5 model reanalysis simulations, rather than physical surface weather station observations.
+> *Note on Weather Data:* Open-Meteo provides atmospheric data via ECMWF ERA5 numerical model reanalysis simulations, rather than physical surface weather station observations.
+> *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
 
 ---
 
@@ -148,13 +174,16 @@ python -m src.ingest.run_all
 # 2. Clean and run data quality checks
 python -m src.clean.run_all
 
-# 3. Build SQL analytical marts
+# 3. Build SQL analytical data marts
 python -m src.model.run_all
 
 # 4. Generate all 9 publication figures
 python -m src.viz.generate_all
 
-# 5. Run test suite
+# 5. Export summary reports (RESULTS.md and README.md)
+python -m src.model.write_results
+
+# 6. Run test suite
 pytest tests/ -v
 ```
 
@@ -168,23 +197,17 @@ streamlit run app/streamlit_app.py
 ## ⚙️ Automated Daily Refresh
 
 The pipeline refreshes daily at **02:00 UTC** via GitHub Actions ([`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)):
-1. Checks out repository.
-2. Ingests latest daily PSP reports and updates weather records.
-3. Cleans, checks quality assertions, and rebuilds SQL marts.
-4. Regenerates all 9 figures and writes [`RESULTS.md`](RESULTS.md).
-5. Commits updated database artifacts and figures back to the repository.
-
----
-
-## ⚠️ Known Limitations
-
-1. **Weather Reanalysis:** Atmospheric temperatures are derived from ECMWF ERA5 gridded reanalysis, which may show minor variations from microclimatic station readings.
-2. **Historical Horizon:** High-frequency 5-minute telemetry from the Mendeley dataset concludes in mid-2025; ongoing live refreshes track Grid-India daily reports.
-3. **Format Evolution:** Grid-India report structures may evolve over time; the parser handles both Excel (.xls) and fallback mechanisms.
+1. Checks out repository with concurrency control.
+2. Ingests latest daily PSP reports from Grid-India with network retry logic.
+3. Updates weather records up to yesterday via Open-Meteo Forecast/Archive API.
+4. Cleans data, executes assertion checks, and rebuilds SQL marts.
+5. Re-fits econometric temperature sensitivity models and updates all 9 visualisations.
+6. Regenerates [`RESULTS.md`](RESULTS.md) and renders [`README.md`](README.md) from [`README.template.md`](README.template.md).
+7. Commits updated reports, figures, and lightweight data exports back to git.
 
 ---
 
 ## 🌐 Live Interactive Dashboard
 
-Access the interactive dashboard deployed on Streamlit Community Cloud:
+Access the interactive dashboard:
 👉 **[Launch Streamlit Dashboard](https://share.streamlit.io/)** *(or run locally with `streamlit run app/streamlit_app.py`)*

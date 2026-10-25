@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from src.utils.config import CITIES
 from src.ingest.grid_india import parse_mop_e_sheet
-from src.ingest.open_meteo import fetch_city_weather
+from src.ingest.open_meteo import fetch_city_weather_recent
 
 
 def test_parse_mop_e_sheet_structure(tmp_path: Path) -> None:

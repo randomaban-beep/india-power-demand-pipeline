@@ -20,6 +20,7 @@ def export_powerbi_tables() -> None:
         "mart_demand_profile_by_season",
         "mart_monthly_peak_demand",
         "mart_temp_vs_demand",
+        "mart_daily_weather_demand",
         "mart_net_load_profile",
         "mart_net_load_ramps",
         "mart_anomaly_days",
@@ -39,6 +40,38 @@ def export_powerbi_tables() -> None:
         log.info("Exported %s: %d rows to %s", m, len(df), csv_path.name)
 
     log.info("All Power BI mart exports complete in %s", PROCESSED_DIR)
+
+
+def export_slim_db() -> Path:
+    """Export clean marts and audit tables to a lightweight database (energy_marts.db)."""
+    conn_src = sqlite3.connect(DB_PATH)
+    slim_path = DB_PATH.parent / "energy_marts.db"
+    conn_dst = sqlite3.connect(slim_path)
+
+    tables = [
+        "mart_demand_profile_by_season",
+        "mart_monthly_peak_demand",
+        "mart_temp_vs_demand",
+        "mart_daily_weather_demand",
+        "mart_net_load_profile",
+        "mart_net_load_ramps",
+        "mart_anomaly_days",
+        "stg_daily_psp",
+        "data_quality_checks",
+        "pipeline_runs"
+    ]
+    for t in tables:
+        try:
+            df = pd.read_sql(f"SELECT * FROM {t}", conn_src)
+            df.to_sql(t, conn_dst, if_exists="replace", index=False)
+        except Exception as e:
+            log.warning("Could not export table %s to slim DB: %s", t, e)
+
+    conn_dst.execute("VACUUM")
+    conn_dst.close()
+    conn_src.close()
+    log.info("Exported slim marts DB to %s (%d bytes)", slim_path.name, slim_path.stat().st_size)
+    return slim_path
 
 
 if __name__ == "__main__":

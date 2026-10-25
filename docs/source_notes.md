@@ -29,22 +29,21 @@
 
 ## 2. Mendeley Hourly Dataset (Historical Backfill)
 
-- **Title:** *Electricity Demand, Solar and Wind Generation Data of India at 1-hour interval*
+- **Title:** *Electricity Demand, Solar and Wind Generation Data (Sept 2021 to Jun 2025) of India at 1-hour interval*
 - **DOI:** [10.17632/y58jknpgs8.2](https://doi.org/10.17632/y58jknpgs8.2)
-- **Authors / Contributors:** Debanjan Mukherjee, Karuna Kalita, Subhash Kumar (IIT Guwahati & Grid-India)
-- **License:** Creative Commons Attribution 4.0 International (CC BY 4.0)
-- **API File Discovery:** `GET https://data.mendeley.com/public-api/datasets/y58jknpgs8/files?folder_id=root&version=2&$start=0&$limit=1000` with header `Accept: application/vnd.mendeley-public-dataset.1+json`
-- **Direct File Downloads:** `https://data.mendeley.com/public-files/datasets/y58jknpgs8/files/{file_id}/file_downloaded`
-- **Format:** Monthly Excel (`.xlsx`) files covering 2021 to 2025.
-  - Sheet `Sheet1` contains timestamped 5-minute SCADA telemetry from NLDC:
-    - `TOTAL_THM_ONLY|P` (Thermal generation MW)
-    - `TOTAL_NLDC_HYD|P` (Hydro generation MW)
-    - `TOTAL_NLDC_GAS|P` (Gas generation MW)
-    - `TOTAL_NLDC_NPC|P` (Nuclear generation MW)
-    - `ALL_INDIA_WIND|P` (Wind generation MW)
-    - `ALL_IND_SOLAR|P` (Solar generation MW)
-    - Total demand / generation (MW)
-- **Cadence:** Historical static backfill (ends mid-2025). Can be aggregated from 5-minute to 1-hour intervals.
+- **Authors / Contributors:** Debanjan Mukherjee, Karuna Kalita, Subhash Kumar (IIT Guwahati & Grid Controller of India)
+- **License:** Creative Commons Attribution 4.0 International (CC BY 4.0) — verified on Mendeley repository page.
+- **Repository Structure & Ingestion Details:**
+  - In version 2 of the dataset, 29 separate spreadsheet files are hosted across distinct logging campaigns:
+    1. **Sept 2021 – Sept 2022:** Monthly Excel files containing 5-minute SCADA telemetry (`TOTAL_THM_ONLY|P`, `TOTAL_NLDC_HYD|P`, `TOTAL_NLDC_GAS|P`, `TOTAL_NLDC_NPC|P`, `ALL_INDIA_WIND|P`, `ALL_IND_SOLAR|P`). Aggregated to 1-hour intervals (9,480 rows).
+    2. **Oct 2022 – Dec 2023:** 10-second ultra-high-resolution SCADA telemetry files (~48 MB per monthly file, >260,000 rows each), from which April 2023 was bundled in standard size (720 rows).
+    3. **Jan 2024 – June 2025:** Pre-aggregated 1-hour interval national SCADA dataset in `January 2024- June 2025.xlsx` under sheet `'Report'` with columns `Timestamp`, `Demand (MW)`, `Wind (MW)`, `Solar (MW)`, and `Total Generation (MW)` (12,984 rows).
+  - **Total Rows Ingested:** 23,184 rows spanning from `2021-09-01T00:00` to `2025-06-24T23:00`.
+  - **Temporal Continuity & Repository Gaps:**
+    - Gap 1: `2022-09-30 23:00` to `2023-04-01 00:00` (4,369 hours, spanning winter 2022-23 and post-monsoon).
+    - Gap 2: `2023-04-30 23:00` to `2024-01-01 00:00` (5,881 hours, spanning monsoon and post-monsoon 2023).
+    - Both gaps are inherent to the published Mendeley dataset repository file availability, audited by `src/clean/quality_checks.py`, and recorded transparently in `RESULTS.md` and Chart 9.
+- **Cadence:** Historical backfill (ends mid-2025). Live daily refreshes are fulfilled continuously via Grid-India Daily PSP reports.
 
 ---
 
