@@ -22,7 +22,21 @@ DOCS_DIR: Path = ROOT_DIR / "docs"
 FIGURES_DIR: Path = DOCS_DIR / "figures"
 SQL_DIR: Path = ROOT_DIR / "sql"
 
-DB_PATH: Path = Path(os.getenv("ENERGY_DB_PATH", str(DATA_DIR / "energy.db")))
+def get_db_path() -> Path:
+    """Return DB path, falling back to committed slim energy_marts.db when energy.db is absent."""
+    env_path = os.getenv("ENERGY_DB_PATH")
+    if env_path:
+        return Path(env_path)
+    primary = DATA_DIR / "energy.db"
+    if primary.exists():
+        return primary
+    slim = DATA_DIR / "energy_marts.db"
+    if slim.exists():
+        return slim
+    return primary
+
+
+DB_PATH: Path = get_db_path()
 
 # ---------------------------------------------------------------------------
 # Open-Meteo cities

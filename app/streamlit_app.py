@@ -10,13 +10,21 @@ Organized into 5 tabs:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+# Ensure repo root is on sys.path so src imports succeed on Streamlit Cloud
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
 import sqlite3
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-from src.utils.config import DB_PATH
+from src.utils.config import get_db_path
 
 st.set_page_config(
     page_title="India Power Demand & Weather Pipeline",
@@ -42,11 +50,13 @@ st.markdown("""
 
 
 @st.cache_resource
-def get_db_connection() -> sqlite3.Connection:
-    return sqlite3.connect(DB_PATH, check_same_thread=False)
+def get_db_connection() -> tuple[sqlite3.Connection, Path]:
+    db_path = get_db_path()
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    return conn, db_path
 
 
-conn = get_db_connection()
+conn, active_db_path = get_db_connection()
 
 # Sidebar
 st.sidebar.title("⚡ India Power Analytics")
@@ -57,9 +67,9 @@ st.sidebar.divider()
 st.sidebar.info(
     "**Data Stack:**\n"
     "- Grid-India NLDC Daily Reports\n"
-    "- Mendeley SCADA Telemetry\n"
+    "- Mendeley Historical Telemetry\n"
     "- Open-Meteo ERA5 Reanalysis\n"
-    "- SQLite (`data/energy.db`)"
+    f"- SQLite (`{active_db_path.name}`)"
 )
 
 # App Title & Header
@@ -127,9 +137,9 @@ with tab_overview:
     with col_left:
         st.subheader("Daily Demand Trajectory (MW)")
         df_daily = pd.read_sql("""
-            SELECT date_ist, ROUND(AVG(demand_mw), 0) as avg_demand, MAX(demand_mw) as peak_demand
-            FROM stg_hourly_demand
-            GROUP BY date_ist
+            SELECT date_ist, avg_daily_demand_mw as avg_demand, peak_daily_demand_mw as peak_demand
+            FROM mart_anomaly_days
+            WHERE avg_daily_demand_mw IS NOT NULL
             ORDER BY date_ist
         """, conn)
         df_daily["date"] = pd.to_datetime(df_daily["date_ist"])
@@ -227,7 +237,8 @@ with tab_weather:
         st.subheader("Diurnal Demand Heatmap")
         df_heat = pd.read_sql("""
             SELECT CAST(strftime('%m', timestamp_ist) AS INTEGER) AS month, hour_ist, ROUND(AVG(demand_mw), 0) as avg_d
-            FROM stg_hourly_demand
+            FROM mart_temp_vs_demand
+            WHERE demand_mw IS NOT NULL
             GROUP BY month, hour_ist
         """, conn)
         pivot_heat = df_heat.pivot(index="hour_ist", columns="month", values="avg_d")
@@ -285,8 +296,9 @@ with tab_re:
 
     st.subheader("Renewable Penetration Over Time")
     df_re_time = pd.read_sql("""
-        SELECT date_ist, ROUND((SUM(solar_mw + wind_mw) / SUM(demand_mw)) * 100.0, 2) as re_pct
-        FROM stg_hourly_demand
+        SELECT date_ist, ROUND((SUM(re_total_mw) / SUM(demand_mw)) * 100.0, 2) as re_pct
+        FROM mart_net_load_profile
+        WHERE demand_mw IS NOT NULL AND demand_mw > 0
         GROUP BY date_ist
         ORDER BY date_ist
     """, conn)
@@ -355,13 +367,9 @@ with tab_health:
         st.dataframe(df_runs, use_container_width=True)
 
     st.markdown("**Database Table Storage Footprint**")
+    table_names = [r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").fetchall()]
     table_sizes = pd.DataFrame([
-        {"Table": "raw_weather", "Rows": conn.execute("SELECT COUNT(*) FROM raw_weather").fetchone()[0]},
-        {"Table": "stg_hourly_weather", "Rows": conn.execute("SELECT COUNT(*) FROM stg_hourly_weather").fetchone()[0]},
-        {"Table": "raw_hourly_demand", "Rows": conn.execute("SELECT COUNT(*) FROM raw_hourly_demand").fetchone()[0]},
-        {"Table": "stg_hourly_demand", "Rows": conn.execute("SELECT COUNT(*) FROM stg_hourly_demand").fetchone()[0]},
-        {"Table": "mart_temp_vs_demand", "Rows": conn.execute("SELECT COUNT(*) FROM mart_temp_vs_demand").fetchone()[0]},
-        {"Table": "mart_net_load_profile", "Rows": conn.execute("SELECT COUNT(*) FROM mart_net_load_profile").fetchone()[0]},
-        {"Table": "data_quality_checks", "Rows": conn.execute("SELECT COUNT(*) FROM data_quality_checks").fetchone()[0]},
+        {"Table": t, "Rows": conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]}
+        for t in table_names
     ])
     st.dataframe(table_sizes, use_container_width=True)
