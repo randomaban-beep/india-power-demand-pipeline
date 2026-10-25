@@ -6,6 +6,7 @@ import datetime as dt
 import time
 from sqlalchemy import text
 
+from src.clean.clean_hourly import clean_hourly_demand
 from src.clean.quality_checks import run_checks
 from src.utils.config import SQL_DIR
 from src.utils.db import get_connection, get_engine, get_trigger, init_db
@@ -42,9 +43,9 @@ def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, dura
 
 
 def run_staging_sql() -> None:
-    """Run all SQL files in sql/staging/ in order."""
+    """Run Python robust cleaning for stg_hourly_demand followed by staging SQL models."""
+    clean_hourly_demand()
     staging_files = [
-        "stg_hourly_demand.sql",
         "stg_hourly_weather.sql",
         "stg_daily_psp.sql",
     ]

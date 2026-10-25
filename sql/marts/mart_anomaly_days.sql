@@ -1,6 +1,6 @@
 -- Mart: Anomaly Days Detection
 -- Business question: Which days exhibit anomalous electricity demand exceeding 2 standard deviations from the same-season and same-weekday norm?
--- Rigorously separates Data-Quality anomalies (sensor dropouts) from Real Grid Demand anomalies (e.g. April heatwaves).
+-- Rigorously separates Data-Quality anomalies (sensor dropouts) from Real Grid Demand anomalies.
 
 DROP TABLE IF EXISTS mart_anomaly_days;
 
