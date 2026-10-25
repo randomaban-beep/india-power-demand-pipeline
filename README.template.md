@@ -20,7 +20,7 @@ An automated, end-to-end data engineering and analytics pipeline tracking India'
 | **Grid Ramping Stress** | **{{P99_1H_RAMP_MW}} MW** 99th percentile 1-hour ramp; **{{MEDIAN_DAILY_MAX_RAMP_MW}} MW** median daily peak ramp | Solar sunset coinciding with evening industrial and domestic peak creates predictable tail ramping stress; largest remaining 1-hour ramp is **{{MAX_1H_RAMP_MW}} MW** (not independently validated). |
 | **Renewable Penetration** | **{{RE_AVG_SHARE}}%** average daily share of electricity demand (peaking at **{{RE_PEAK_SHARE}}%** on 2025-05-31) | Cross-validated against official Grid-India daily reports (share of generation, peaking at 21.9% on the exact same date; Pearson $r = {{RE_CROSS_CORR}}$, mean difference {{RE_CROSS_DIFF}}%). Solar and wind generation are actively reshaping the diurnal load curve across all five regional grids. |
 | **Peak Demand Benchmark** | **{{PEAK_HOURLY_DEMAND_MW}} MW** in hourly dataset window ({{PEAK_HOURLY_DATE}}) | Highest demand met recorded among loaded Grid-India daily reports reached **{{ALL_TIME_GRID_PEAK_MW}} MW** ({{ALL_TIME_GRID_PEAK_DATE}}). |
-| **Data Quality & Telemetry Audit** | **{{DROPOUTS_REMOVED}} glitch hours nullified** (including {{MULTI_HOUR_DIPS}} multi-hour dips); **{{TOTAL_GAPS_COUNT}} historical gaps audited** | High-frequency telemetry spans {{TOTAL_HOURLY_DAYS}} days ({{YEAR_BREAKDOWN}}); 2 documented multi-month gaps in the historical archive; dropouts, multi-hour dips, and flatlined sensors were isolated and set to `NULL` (never silently interpolated). |
+| **Data Quality & Telemetry Audit** | **{{UNIQUE_NULL_HOURS}} unique hours with any NULL** in demand, solar, or wind (including {{DROPOUTS_REMOVED}} glitch hours and {{MULTI_HOUR_DIPS}} multi-hour dips); **{{TOTAL_GAPS_COUNT}} historical gaps audited** | High-frequency telemetry spans {{TOTAL_HOURLY_DAYS}} days ({{YEAR_BREAKDOWN}}); 2 documented multi-month gaps in the historical archive; dropouts, multi-hour dips, and flatlined sensors were isolated and set to `NULL` (never silently interpolated). |
 
 ---
 
@@ -155,7 +155,7 @@ Automated data quality assertion suite, records per architectural layer, and gap
 | [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated PMU / SCADA telemetry for demand, solar, and wind generation | {{HOURLY_SPAN_START}} to {{HOURLY_SPAN_END}} ({{TOTAL_STORED_HOURS}} hours across {{TOTAL_HOURLY_DAYS}} days: {{YEAR_BREAKDOWN}}) | CC BY 4.0 (Attribution 4.0 International) |
 | [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
 
-> *\*Note on Daily PSP Coverage:* Earlier years have fewer reports because the Grid-India portal published older historical reports primarily as PDF files with irregular file naming rather than direct Excel spreadsheets.
+> *\*Note on Daily PSP Coverage (API Listed vs Parsed):* {{PSP_COVERAGE_EXPLANATION}}
 > *Note on Weather Data:* Open-Meteo provides atmospheric data via ECMWF ERA5 numerical model reanalysis simulations, rather than physical surface weather station observations.
 > *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 documented multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
 

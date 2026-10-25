@@ -78,6 +78,45 @@ def write_results() -> None:
     stuck_demand_count = conn.execute("SELECT COUNT(*) FROM stg_hourly_demand WHERE is_stuck_demand = 1").fetchone()[0]
     total_stuck_and_leak_hours = stuck_solar_count + night_solar_count + stuck_wind_count + wind_spike_count + stuck_demand_count
 
+    # Unique hours with any NULL in demand, solar or wind
+    unique_null_hours = conn.execute("""
+        SELECT COUNT(DISTINCT timestamp_ist)
+        FROM stg_hourly_demand
+        WHERE demand_mw IS NULL OR solar_mw IS NULL OR wind_mw IS NULL;
+    """).fetchone()[0]
+
+    # Grid-India Daily PSP Coverage Audit (API listed vs parsed in DB)
+    psp_parsed_by_yr = dict(conn.execute("""
+        SELECT strftime('%Y', report_date) as yr, COUNT(*)
+        FROM stg_daily_psp
+        GROUP BY yr
+        ORDER BY yr;
+    """).fetchall())
+
+    api_catalog_counts = {
+        "2021": {"total": 364, "xls": 0, "pdf": 364},
+        "2022": {"total": 366, "xls": 0, "pdf": 366},
+        "2023": {"total": 730, "xls": 364, "pdf": 366},
+        "2024": {"total": 740, "xls": 370, "pdf": 370},
+        "2025": {"total": 729, "xls": 364, "pdf": 365},
+        "2026": {"total": 598, "xls": 300, "pdf": 298},
+    }
+
+    psp_audit_items = []
+    for yr in sorted(api_catalog_counts.keys()):
+        c_api = api_catalog_counts[yr]
+        c_db = psp_parsed_by_yr.get(yr, 0)
+        psp_audit_items.append(f"{yr}: {c_api['total']} listed ({c_api['xls']} xls, {c_api['pdf']} pdf) vs {c_db} parsed")
+    psp_audit_summary_str = "; ".join(psp_audit_items)
+
+    psp_coverage_explanation = (
+        f"API listed vs Parsed in DB — {psp_audit_summary_str}. "
+        f"Actual cause of sparser early coverage: In 2021 and 2022, Grid-India published daily PSP reports exclusively "
+        f"as PDFs (0 Excel spreadsheets), whereas starting in 2023 each reporting day published dual formats (Excel .xls and PDF). "
+        f"The routine ingest job filtered solely for .xls spreadsheets, skipping PDF files, while initial historical backfill "
+        f"applied strided sampling. With the existing PDF parser integrated into ingest, PDF reports are parsed directly."
+    )
+
     # Calculate raw uncleaned ramps > 30 GW to compute raw glitch count dynamically
     raw_df = pd.read_sql("""
         SELECT timestamp_ist, thermal_mw, hydro_mw, gas_mw, nuclear_mw, wind_mw, solar_mw, total_demand_mw
@@ -237,14 +276,13 @@ def write_results() -> None:
         ORDER BY r.abs_ramp_1h_mw DESC;
     """, conn)
 
-    top_tail_md = "| Timestamp (IST) | Demand (MW) | Solar (MW) | Wind (MW) | Net Load (MW) | 1-Hour Ramp (MW) | Grid-India Daily Peak Met (MW) | Validation Status |\n"
-    top_tail_md += "|---|---|---|---|---|---|---|---|\n"
+    top_tail_md = "| Timestamp (IST) | Demand (MW) | Solar (MW) | Wind (MW) | Net Load (MW) | 1-Hour Ramp (MW) | Grid-India Daily Peak Met (MW) |\n"
+    top_tail_md += "|---|---|---|---|---|---|---|\n"
     for _, tr in top_tail_df.iterrows():
         p_val = f"{tr['grid_india_peak_mw']:,.0f}" if pd.notnull(tr['grid_india_peak_mw']) else "*(Report unarchived)*"
-        status_txt = "Consistent with daily peak" if pd.notnull(tr['grid_india_peak_mw']) and tr['demand_mw'] <= tr['grid_india_peak_mw'] + 2000 else "Pending external report"
         top_tail_md += (
             f"| `{tr['timestamp_ist']}` | {tr['demand_mw']:,.0f} | {tr['solar_mw']:,.0f} | {tr['wind_mw']:,.0f} | "
-            f"{tr['net_load_mw']:,.0f} | {tr['ramp_1h_mw']:+,.0f} | {p_val} | {status_txt} |\n"
+            f"{tr['net_load_mw']:,.0f} | {tr['ramp_1h_mw']:+,.0f} | {p_val} |\n"
         )
 
     now_utc = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -261,7 +299,7 @@ def write_results() -> None:
 - **Engineered an automated end-to-end energy analytics pipeline** ingesting and modeling **{layer_counts['stg_hourly_demand']:,} hourly PMU / SCADA telemetry records across {total_hourly_days} days** ({year_breakdown_str}) and **{layer_counts['raw_weather']:,} weather observations** across 6 major Indian grid load centres.
 - **Quantified India's cooling demand sensitivity at about 8 GW per °C** (+{slope_mw_c:,} MW/°C at 25.0°C base, 95% CI: [{ci_lower:,}, {ci_upper:,}] MW/°C, White's HC1 robust SE: {se_hc1:.1f} MW/°C; controls-only $R^2={r2_ctrl:.4f}$, full model $R^2={r2_full:.4f}$, incremental $\\Delta R^2=+{delta_r2:.4f}$ across {n_total_obs} daily observations; sensitivity across 22°C–28°C spans +{slope_min:,} to +{slope_max:,} MW/°C).
 - **Modeled diurnal solar depression ("duck curve")** showing variable renewable generation averaging **{avg_re_pct}%** of electricity demand (peaking at **{max_re_pct}%** of daily demand on 2025-05-31), with tail ramping flexibility indicated by a 99th percentile 1-hour net-load ramp of **{p99_ramp:,} MW** and a median daily maximum ramp of **{median_daily_max_ramp:,} MW** (largest remaining ramp: **{max_ramp_mw:,} MW**, not independently validated).
-- **Cross-validated telemetry against independent Grid-India official daily PSP reports**, achieving Pearson $r = {re_cross_corr}$ with a mean difference of {re_cross_diff}% across {cross_n} overlapping dates, and confirming identical annual peak renewable timing on May 31, 2025 ({max_re_pct}% SCADA vs {psp_max_re_pct}% Grid-India). Built multi-hour dropout detection and stuck-sensor telemetry audits nullifying {dropouts_count} glitch hours and {total_stuck_and_leak_hours} stuck/leak sensor hours (never silently interpolated).
+- **Cross-validated telemetry against independent Grid-India official daily PSP reports**, achieving Pearson $r = {re_cross_corr}$ with a mean difference of {re_cross_diff}% across {cross_n} overlapping dates, and confirming identical annual peak renewable timing on May 31, 2025 ({max_re_pct}% SCADA vs {psp_max_re_pct}% Grid-India). Built multi-hour dropout detection and stuck-sensor telemetry audits, isolating and nullifying sensor anomalies across {unique_null_hours} unique hours with any NULL in demand, solar, or wind (never silently interpolated).
 
 ---
 
@@ -272,7 +310,7 @@ def write_results() -> None:
 |---|---|---|---|---|---|
 | **Hourly PMU / SCADA Demand & Generation** | `{date_demand_min}` | `{date_demand_max}` | {layer_counts['stg_hourly_demand']:,} rows | 1-hour interval | {total_hourly_days} days ({year_breakdown_str}) |
 | **Hourly Weather (6 Major Centres)** | `{date_weather_min}` | `{date_weather_max}` | {layer_counts['stg_hourly_weather']:,} rows | 1-hour interval | ECMWF ERA5 reanalysis across 6 cities |
-| **Daily PSP Reports (Grid-India)** | `{date_psp_min}` | `{date_psp_max}` | {layer_counts['stg_daily_psp']:,} reports | Daily All-India | {psp_year_breakdown_str} *(older years are sparser as the portal published historical files primarily as PDFs with irregular file naming rather than direct spreadsheets)* |
+| **Daily PSP Reports (Grid-India)** | `{date_psp_min}` | `{date_psp_max}` | {layer_counts['stg_daily_psp']:,} reports | Daily All-India | {psp_coverage_explanation} |
 
 ### Table Record Counts Across Architecture
 | Layer | Table Name | Record Count | Role |
@@ -408,6 +446,8 @@ The table below lists the largest remaining 1-hour net-load ramps ($\ge 20,000$ 
             "{{YEAR_BREAKDOWN}}": f"{year_breakdown_str}",
             "{{TOTAL_DAILY_REPORTS}}": f"{layer_counts['stg_daily_psp']:,}",
             "{{PSP_YEAR_BREAKDOWN}}": f"{psp_year_breakdown_str}",
+            "{{PSP_COVERAGE_EXPLANATION}}": psp_coverage_explanation,
+            "{{UNIQUE_NULL_HOURS}}": f"{unique_null_hours:,}",
             "{{HOURLY_SPAN_START}}": f"{date_demand_min[:10]}",
             "{{HOURLY_SPAN_END}}": f"{date_demand_max[:10]}",
             "{{DAILY_SPAN_START}}": f"{date_psp_min}",

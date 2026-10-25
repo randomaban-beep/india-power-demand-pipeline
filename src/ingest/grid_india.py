@@ -257,25 +257,37 @@ def parse_pdf_psp(pdf_content: bytes, filename: str = "") -> tuple[dict[str, Any
     if not report_iso_date:
         return {}, []
 
-    def get_num(pat: str) -> float | None:
+    def get_num(pat: str, multiline_label: str | None = None) -> float | None:
         m = re.search(pat, txt, re.MULTILINE)
         if m:
             try:
                 return float(m.group(1).replace(",", ""))
             except ValueError:
-                return None
+                pass
+        if multiline_label:
+            esc = re.escape(multiline_label)
+            m2 = re.search(esc + r"[^\n]*\n\s*([0-9, \.]+)\n", txt)
+            if m2:
+                nums = []
+                for p in m2.group(1).split():
+                    try:
+                        nums.append(float(p.replace(",", "")))
+                    except ValueError:
+                        pass
+                if nums:
+                    return nums[-1]
         return None
 
     all_india: dict[str, Any] = {
         "report_date": report_iso_date,
-        "evening_peak_mw": get_num(r"Demand Met during Evening Peak.*?\s+([0-9,]+)\s*$"),
-        "evening_peak_shortage_mw": get_num(r"Peak Shortage \(MW\).*?\s+([0-9,.]+)\s*$"),
-        "energy_met_mu": get_num(r"Energy Met \(MU\).*?\s+([0-9,.]+)\s*$"),
-        "hydro_gen_mu": get_num(r"Hydro Gen \(MU\).*?\s+([0-9,.]+)\s*$"),
-        "wind_gen_mu": get_num(r"Wind Gen \(MU\).*?\s+([0-9,.]+)\s*$"),
-        "solar_gen_mu": get_num(r"Solar Gen \(MU\)\*?.*?\s+([0-9,.]+)\s*$"),
-        "energy_shortage_mu": get_num(r"Energy Shortage \(MU\).*?\s+([0-9,.]+)\s*$"),
-        "max_demand_met_mw": get_num(r"Maximum Demand Met During the Day.*?\s+([0-9,]+)\s*$"),
+        "evening_peak_mw": get_num(r"Demand Met during Evening Peak.*?\s+([0-9,]+)\s*$", "Demand Met during Evening Peak"),
+        "evening_peak_shortage_mw": get_num(r"Peak Shortage \(MW\).*?\s+([0-9,.]+)\s*$", "Peak Shortage (MW)"),
+        "energy_met_mu": get_num(r"Energy Met \(MU\).*?\s+([0-9,.]+)\s*$", "Energy Met (MU)"),
+        "hydro_gen_mu": get_num(r"Hydro Gen \(MU\).*?\s+([0-9,.]+)\s*$", "Hydro Gen (MU)"),
+        "wind_gen_mu": get_num(r"Wind Gen \(MU\).*?\s+([0-9,.]+)\s*$", "Wind Gen (MU)"),
+        "solar_gen_mu": get_num(r"Solar Gen \(MU\)\*?.*?\s+([0-9,.]+)\s*$", "Solar Gen (MU)"),
+        "energy_shortage_mu": get_num(r"Energy Shortage \(MU\).*?\s+([0-9,.]+)\s*$", "Energy Shortage (MU)"),
+        "max_demand_met_mw": get_num(r"Maximum Demand Met During the Day.*?\s+([0-9,]+)\s*$", "Maximum Demand Met During the Day"),
         "max_demand_time": None,
         "coal_gen_mu": None,
         "lignite_gen_mu": None,
@@ -409,13 +421,31 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
 
 
 def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
-    """Download and ingest recent daily PSP reports."""
+    """Download and ingest recent daily PSP reports, parsing Excel or PDF as published."""
     init_db()
     create_raw_tables()
     engine = get_engine()
     
-    catalog = fetch_file_catalog(limit=limit * 2)
-    xls_items = [item for item in catalog if str(item.get("MimeType")).endswith("excel") or str(item.get("FilePath")).endswith(".xls")]
+    catalog = fetch_file_catalog(limit=limit * 3)
+    # Deduplicate by reporting date key, preferring Excel if both are available
+    date_to_item: dict[str, dict[str, Any]] = {}
+    for item in catalog:
+        title = item.get("Title_", "")
+        date_key = title.split("_")[0]
+        if not date_key:
+            continue
+        mime = str(item.get("MimeType", "")).lower()
+        filepath = str(item.get("FilePath", "")).lower()
+        is_xls = "excel" in mime or filepath.endswith(".xls") or filepath.endswith(".xlsx")
+        is_pdf = "pdf" in mime or filepath.endswith(".pdf")
+        if not (is_xls or is_pdf):
+            continue
+        if date_key not in date_to_item:
+            date_to_item[date_key] = item
+        elif is_xls:
+            date_to_item[date_key] = item
+    
+    items_to_process = list(date_to_item.values())[:limit]
     
     total_daily_rows = 0
     total_state_rows = 0
@@ -423,7 +453,7 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
     
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     
-    for item in xls_items[:limit]:
+    for item in items_to_process:
         rel_path = item.get("FilePath", "")
         if not rel_path:
             continue
@@ -439,9 +469,15 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
                 else:
                     continue
             
-            all_india, states = parse_mop_e_sheet(local_path)
+            if local_path.suffix.lower() in [".xls", ".xlsx"] or "excel" in str(item.get("MimeType", "")).lower():
+                all_india, states = parse_mop_e_sheet(local_path)
+            elif local_path.suffix.lower() == ".pdf" or "pdf" in str(item.get("MimeType", "")).lower():
+                all_india, states = parse_pdf_psp(local_path.read_bytes(), filename=item.get("Title_", ""))
+            else:
+                continue
+
             rep_date = all_india.get("report_date")
-            if not rep_date:
+            if not rep_date or not all_india.get("max_demand_met_mw"):
                 continue
 
             with engine.connect() as conn:

@@ -15,12 +15,12 @@ An automated, end-to-end data engineering and analytics pipeline tracking India'
 
 | Finding | Metric / Evidence | Strategic Takeaway ("So What") |
 |---|---|---|
-| **Controlled Temperature Elasticity** | **about 8 GW per °C** (+7,780 MW/°C at 25°C base, 95% CI: [6,975, 8,585] MW/°C, White's HC1 SE: 410.7 MW/°C; controls $R^2=0.7961$, full $R^2=0.8683$, incremental $\Delta R^2=+0.0722$ across 725 days; sensitivity across 22°C–28°C spans 5.9 GW to 10.0 GW) | Controlling for day-of-week, calendar month, and multi-year economic trend, every 1°C increase above 25°C adds about 8 GW of national peak cooling demand. Temperature accounts for an incremental +0.0722 of variance beyond seasonal/trend controls. |
+| **Controlled Temperature Elasticity** | **about 8 GW per °C** (+7,829 MW/°C at 25°C base, 95% CI: [7,025, 8,632] MW/°C, White's HC1 SE: 410.0 MW/°C; controls $R^2=0.7928$, full $R^2=0.8658$, incremental $\Delta R^2=+0.0730$ across 743 days; sensitivity across 22°C–28°C spans 6.0 GW to 10.1 GW) | Controlling for day-of-week, calendar month, and multi-year economic trend, every 1°C increase above 25°C adds about 8 GW of national peak cooling demand. Temperature accounts for an incremental +0.0730 of variance beyond seasonal/trend controls. |
 | **Midday Solar Suppression** | **~46,005 MW** midday solar belly depth | Midday net load is significantly depressed during summer months, requiring steep thermal ramp-downs followed by aggressive evening ramp-ups. |
 | **Grid Ramping Stress** | **16,768 MW** 99th percentile 1-hour ramp; **13,093 MW** median daily peak ramp | Solar sunset coinciding with evening industrial and domestic peak creates predictable tail ramping stress; largest remaining 1-hour ramp is **26,577 MW** (not independently validated). |
 | **Renewable Penetration** | **11.1%** average daily share of electricity demand (peaking at **22.4%** on 2025-05-31) | Cross-validated against official Grid-India daily reports (share of generation, peaking at 21.9% on the exact same date; Pearson $r = 0.9875$, mean difference -0.36%). Solar and wind generation are actively reshaping the diurnal load curve across all five regional grids. |
 | **Peak Demand Benchmark** | **248,688 MW** in hourly dataset window (2024-05-30) | Highest demand met recorded among loaded Grid-India daily reports reached **270,820 MW** (2026-05-21). |
-| **Data Quality & Telemetry Audit** | **337 glitch hours nullified** (including 177 multi-hour dips); **2 historical gaps audited** | High-frequency telemetry spans 966 days (2021: 122, 2022: 273, 2023: 30, 2024: 366, 2025: 175); 2 documented multi-month gaps in the historical archive; dropouts, multi-hour dips, and flatlined sensors were isolated and set to `NULL` (never silently interpolated). |
+| **Data Quality & Telemetry Audit** | **918 unique hours with any NULL** in demand, solar, or wind (including 337 glitch hours and 177 multi-hour dips); **2 historical gaps audited** | High-frequency telemetry spans 966 days (2021: 122, 2022: 273, 2023: 30, 2024: 366, 2025: 175); 2 documented multi-month gaps in the historical archive; dropouts, multi-hour dips, and flatlined sensors were isolated and set to `NULL` (never silently interpolated). |
 
 ---
 
@@ -36,21 +36,21 @@ Continuous time-series tracking daily average demand, 7-day rolling baseline, an
 ### 2. Controlled Temperature Sensitivity of Electricity Demand
 Daily peak demand regressed against multi-city daily mean temperature, with categorical controls for weekday, month, and year trend.
 ![Temperature vs Demand](docs/figures/02_temp_vs_demand.png)
-*Takeaway: Daily peak demand expands at about 8 GW per °C (+7,780 MW/°C at 25.0°C base, 95% CI: [6,975, 8,585] MW/°C, White's HC1 SE: 410.7 MW/°C, full model $R^2=0.8683$, incremental $\Delta R^2=+0.0722$, $N=725$ observations) above the 25.0°C cooling base.*
+*Takeaway: Daily peak demand expands at about 8 GW per °C (+7,829 MW/°C at 25.0°C base, 95% CI: [7,025, 8,632] MW/°C, White's HC1 SE: 410.0 MW/°C, full model $R^2=0.8658$, incremental $\Delta R^2=+0.0730$, $N=743$ observations) above the 25.0°C cooling base.*
 
 #### Candidate Threshold Sensitivity Analysis (22°C to 28°C)
 
-Evaluated on the same full sample of 725 daily observations using an OLS regression with a hinge term $\max(T - T^*, 0)$ and categorical controls for day-of-week, calendar month, and multi-year economic trend:
+Evaluated on the same full sample of 743 daily observations using an OLS regression with a hinge term $\max(T - T^*, 0)$ and categorical controls for day-of-week, calendar month, and multi-year economic trend:
 
 | Threshold (°C) | Days $\ge T$ ($N$) | Observations ($N$) | Slope (MW/°C) | White's HC1 SE | 95% Confidence Interval | Controls $R^2$ | Full $R^2$ | Incremental $\Delta R^2$ | AIC |
 |---|---|---|---|---|---|---|---|---|---|
-| **22.0°C** | 631 | 725 | +5,912.6 | 433.6 | [5,062.7, 6,762.4] | 0.7961 | 0.8495 | **+0.0534** | 13,320.5 |
-| **23.0°C** | 590 | 725 | +6,437.6 | 430.2 | [5,594.4, 7,280.9] | 0.7961 | 0.8555 | **+0.0595** | 13,290.6 |
-| **24.0°C** | 546 | 725 | +7,054.9 | 421.5 | [6,228.7, 7,881.1] | 0.7961 | 0.8614 | **+0.0653** | 13,260.6 |
-| **25.0°C** **(Selected Base)** | 517 | 725 | +7,780.1 | 410.7 | [6,975.2, 8,585.0] | 0.7961 | 0.8683 | **+0.0722** | 13,223.8 |
-| **26.0°C** | 479 | 725 | +8,447.7 | 391.6 | [7,680.1, 9,215.2] | 0.7961 | 0.8730 | **+0.0770** | 13,197.1 |
-| **27.0°C** | 413 | 725 | +9,259.0 | 401.1 | [8,472.9, 10,045.1] | 0.7961 | 0.8731 | **+0.0770** | 13,196.8 |
-| **28.0°C** | 272 | 725 | +10,044.2 | 452.4 | [9,157.5, 10,930.8] | 0.7961 | 0.8616 | **+0.0656** | 13,259.4 |
+| **22.0°C** | 638 | 743 | +5,977.0 | 430.7 | [5,132.9, 6,821.1] | 0.7928 | 0.8476 | **+0.0547** | 13,644.8 |
+| **23.0°C** | 593 | 743 | +6,486.9 | 429.1 | [5,645.8, 7,328.0] | 0.7928 | 0.8531 | **+0.0603** | 13,617.4 |
+| **24.0°C** | 548 | 743 | +7,102.4 | 420.6 | [6,278.0, 7,926.8] | 0.7928 | 0.8589 | **+0.0661** | 13,587.5 |
+| **25.0°C** **(Selected Base)** | 519 | 743 | +7,828.7 | 410.0 | [7,025.2, 8,632.3] | 0.7928 | 0.8658 | **+0.0730** | 13,550.2 |
+| **26.0°C** | 481 | 743 | +8,495.8 | 391.5 | [7,728.4, 9,263.2] | 0.7928 | 0.8706 | **+0.0777** | 13,523.4 |
+| **27.0°C** | 415 | 743 | +9,304.5 | 401.7 | [8,517.1, 10,092.0] | 0.7928 | 0.8705 | **+0.0777** | 13,523.6 |
+| **28.0°C** | 274 | 743 | +10,064.1 | 449.6 | [9,182.8, 10,945.4] | 0.7928 | 0.8586 | **+0.0658** | 13,588.9 |
 
 
 ---
@@ -97,38 +97,38 @@ Histogram of hour-to-hour net load changes computed strictly between consecutive
 
 #### Largest Remaining Ramps (Not Independently Validated, Flagged for Manual Review)
 
-| Timestamp (IST) | Demand (MW) | Solar (MW) | Wind (MW) | Net Load (MW) | 1-Hour Ramp (MW) | Grid-India Daily Peak Met (MW) | Validation Status |
-|---|---|---|---|---|---|---|---|
-| `2024-01-27T07:00` | 195,828 | 2,243 | 10,085 | 183,500 | +26,577 | *(Report unarchived)* | Pending external report |
-| `2025-01-21T17:00` | 199,637 | 8,472 | 2,608 | 188,557 | +25,329 | 226,044 | Consistent with daily peak |
-| `2025-01-20T07:00` | 203,719 | 2,888 | 4,469 | 196,362 | +23,794 | *(Report unarchived)* | Pending external report |
-| `2024-01-30T12:00` | 193,152 | 34,864 | 861 | 157,427 | -23,229 | *(Report unarchived)* | Pending external report |
-| `2025-05-06T16:00` | 196,770 | 27,116 | 8,709 | 160,945 | +22,940 | 202,394 | Consistent with daily peak |
-| `2025-01-13T07:00` | 198,424 | 1,911 | 10,859 | 185,654 | +21,772 | *(Report unarchived)* | Pending external report |
-| `2025-01-24T06:00` | 187,239 | 110 | 12,183 | 174,946 | +21,393 | *(Report unarchived)* | Pending external report |
-| `2025-01-28T15:00` | 212,517 | 32,190 | 2,244 | 178,083 | +21,336 | *(Report unarchived)* | Pending external report |
-| `2025-01-21T06:00` | 184,326 | 139 | 5,668 | 178,519 | +21,195 | 226,044 | Consistent with daily peak |
-| `2025-01-06T07:00` | 199,238 | 3,066 | 10,185 | 185,988 | +21,145 | 223,964 | Consistent with daily peak |
-| `2024-12-19T06:00` | 181,023 | 299 | 5,956 | 174,769 | +21,015 | *(Report unarchived)* | Pending external report |
-| `2025-01-22T06:00` | 186,839 | 184 | 6,773 | 179,881 | +20,922 | 228,085 | Consistent with daily peak |
-| `2025-01-07T06:00` | 182,418 | 213 | 11,454 | 170,751 | +20,797 | *(Report unarchived)* | Pending external report |
-| `2024-12-18T06:00` | 178,890 | 356 | 7,732 | 170,802 | +20,781 | *(Report unarchived)* | Pending external report |
-| `2025-01-06T06:00` | 175,987 | 641 | 10,503 | 164,843 | +20,581 | 223,964 | Consistent with daily peak |
-| `2025-01-15T07:00` | 190,680 | 2,055 | 11,028 | 177,598 | +20,542 | *(Report unarchived)* | Pending external report |
-| `2022-05-06T15:00` | 172,503 | 23,446 | 4,792 | 144,265 | -20,492 | *(Report unarchived)* | Pending external report |
-| `2025-01-18T07:00` | 199,876 | 2,516 | 8,229 | 189,131 | +20,440 | *(Report unarchived)* | Pending external report |
-| `2025-01-29T06:00` | 193,557 | 270 | 6,001 | 187,286 | +20,431 | *(Report unarchived)* | Pending external report |
-| `2025-01-27T06:00` | 179,649 | 275 | 3,564 | 175,809 | +20,362 | *(Report unarchived)* | Pending external report |
-| `2025-01-24T07:00` | 209,896 | 2,850 | 11,812 | 195,235 | +20,290 | *(Report unarchived)* | Pending external report |
-| `2025-01-13T06:00` | 175,325 | 232 | 11,212 | 163,882 | +20,284 | *(Report unarchived)* | Pending external report |
-| `2022-03-09T01:00` | 136,384 | 0 | 7,620 | 128,763 | -20,251 | 192,026 | Consistent with daily peak |
-| `2025-01-27T07:00` | 203,595 | 3,472 | 4,096 | 196,027 | +20,218 | *(Report unarchived)* | Pending external report |
-| `2025-01-30T06:00` | 191,596 | 171 | 6,473 | 184,953 | +20,212 | *(Report unarchived)* | Pending external report |
-| `2025-01-28T06:00` | 190,398 | 100 | 4,078 | 186,221 | +20,160 | *(Report unarchived)* | Pending external report |
-| `2025-01-07T07:00` | 204,467 | 2,577 | 11,033 | 190,856 | +20,106 | *(Report unarchived)* | Pending external report |
-| `2024-01-09T07:00` | 191,230 | 975 | 9,421 | 180,834 | +20,053 | *(Report unarchived)* | Pending external report |
-| `2024-12-20T06:00` | 182,141 | 317 | 10,767 | 171,058 | +20,027 | *(Report unarchived)* | Pending external report |
-| `2025-01-16T07:00` | 194,095 | 2,304 | 10,130 | 181,661 | +20,018 | 220,355 | Consistent with daily peak |
+| Timestamp (IST) | Demand (MW) | Solar (MW) | Wind (MW) | Net Load (MW) | 1-Hour Ramp (MW) | Grid-India Daily Peak Met (MW) |
+|---|---|---|---|---|---|---|
+| `2024-01-27T07:00` | 195,828 | 2,243 | 10,085 | 183,500 | +26,577 | 219,550 |
+| `2025-01-21T17:00` | 199,637 | 8,472 | 2,608 | 188,557 | +25,329 | 226,044 |
+| `2025-01-20T07:00` | 203,719 | 2,888 | 4,469 | 196,362 | +23,794 | 222,178 |
+| `2024-01-30T12:00` | 193,152 | 34,864 | 861 | 157,427 | -23,229 | 219,094 |
+| `2025-05-06T16:00` | 196,770 | 27,116 | 8,709 | 160,945 | +22,940 | 202,394 |
+| `2025-01-13T07:00` | 198,424 | 1,911 | 10,859 | 185,654 | +21,772 | 220,650 |
+| `2025-01-24T06:00` | 187,239 | 110 | 12,183 | 174,946 | +21,393 | 231,215 |
+| `2025-01-28T15:00` | 212,517 | 32,190 | 2,244 | 178,083 | +21,336 | 234,950 |
+| `2025-01-21T06:00` | 184,326 | 139 | 5,668 | 178,519 | +21,195 | 226,044 |
+| `2025-01-06T07:00` | 199,238 | 3,066 | 10,185 | 185,988 | +21,145 | 223,964 |
+| `2024-12-19T06:00` | 181,023 | 299 | 5,956 | 174,769 | +21,015 | 219,721 |
+| `2025-01-22T06:00` | 186,839 | 184 | 6,773 | 179,881 | +20,922 | 228,085 |
+| `2025-01-07T06:00` | 182,418 | 213 | 11,454 | 170,751 | +20,797 | 228,072 |
+| `2024-12-18T06:00` | 178,890 | 356 | 7,732 | 170,802 | +20,781 | 217,753 |
+| `2025-01-06T06:00` | 175,987 | 641 | 10,503 | 164,843 | +20,581 | 223,964 |
+| `2025-01-15T07:00` | 190,680 | 2,055 | 11,028 | 177,598 | +20,542 | 216,777 |
+| `2022-05-06T15:00` | 172,503 | 23,446 | 4,792 | 144,265 | -20,492 | 199,773 |
+| `2025-01-18T07:00` | 199,876 | 2,516 | 8,229 | 189,131 | +20,440 | 225,118 |
+| `2025-01-29T06:00` | 193,557 | 270 | 6,001 | 187,286 | +20,431 | 237,309 |
+| `2025-01-27T06:00` | 179,649 | 275 | 3,564 | 175,809 | +20,362 | 230,451 |
+| `2025-01-24T07:00` | 209,896 | 2,850 | 11,812 | 195,235 | +20,290 | 231,215 |
+| `2025-01-13T06:00` | 175,325 | 232 | 11,212 | 163,882 | +20,284 | 220,650 |
+| `2022-03-09T01:00` | 136,384 | 0 | 7,620 | 128,763 | -20,251 | 192,026 |
+| `2025-01-27T07:00` | 203,595 | 3,472 | 4,096 | 196,027 | +20,218 | 230,451 |
+| `2025-01-30T06:00` | 191,596 | 171 | 6,473 | 184,953 | +20,212 | 234,525 |
+| `2025-01-28T06:00` | 190,398 | 100 | 4,078 | 186,221 | +20,160 | 234,950 |
+| `2025-01-07T07:00` | 204,467 | 2,577 | 11,033 | 190,856 | +20,106 | 228,072 |
+| `2024-01-09T07:00` | 191,230 | 975 | 9,421 | 180,834 | +20,053 | 207,039 |
+| `2024-12-20T06:00` | 182,141 | 317 | 10,767 | 171,058 | +20,027 | 224,169 |
+| `2025-01-16T07:00` | 194,095 | 2,304 | 10,130 | 181,661 | +20,018 | 220,355 |
 
 
 ---
@@ -192,11 +192,11 @@ Automated data quality assertion suite, records per architectural layer, and gap
 
 | Source | Description | Coverage Span | License / Terms |
 |---|---|---|---|
-| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | 2021-05-07 to 2026-10-24 (751 reports: 2021: 52, 2022: 81, 2023: 77, 2024: 82, 2025: 162, 2026: 297)* | Public Indian government data |
+| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | 2021-05-07 to 2026-10-24 (769 reports: 2021: 52, 2022: 83, 2023: 77, 2024: 88, 2025: 172, 2026: 297)* | Public Indian government data |
 | [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated PMU / SCADA telemetry for demand, solar, and wind generation | 2021-09-01 to 2025-06-24 (23,184 hours across 966 days: 2021: 122, 2022: 273, 2023: 30, 2024: 366, 2025: 175) | CC BY 4.0 (Attribution 4.0 International) |
 | [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
 
-> *\*Note on Daily PSP Coverage:* Earlier years have fewer reports because the Grid-India portal published older historical reports primarily as PDF files with irregular file naming rather than direct Excel spreadsheets.
+> *\*Note on Daily PSP Coverage (API Listed vs Parsed):* API listed vs Parsed in DB — 2021: 364 listed (0 xls, 364 pdf) vs 52 parsed; 2022: 366 listed (0 xls, 366 pdf) vs 83 parsed; 2023: 730 listed (364 xls, 366 pdf) vs 77 parsed; 2024: 740 listed (370 xls, 370 pdf) vs 88 parsed; 2025: 729 listed (364 xls, 365 pdf) vs 172 parsed; 2026: 598 listed (300 xls, 298 pdf) vs 297 parsed. Actual cause of sparser early coverage: In 2021 and 2022, Grid-India published daily PSP reports exclusively as PDFs (0 Excel spreadsheets), whereas starting in 2023 each reporting day published dual formats (Excel .xls and PDF). The routine ingest job filtered solely for .xls spreadsheets, skipping PDF files, while initial historical backfill applied strided sampling. With the existing PDF parser integrated into ingest, PDF reports are parsed directly.
 > *Note on Weather Data:* Open-Meteo provides atmospheric data via ECMWF ERA5 numerical model reanalysis simulations, rather than physical surface weather station observations.
 > *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 documented multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
 
