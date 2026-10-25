@@ -1,0 +1,61 @@
+name: Daily pipeline refresh
+
+on:
+  schedule:
+    # 02:00 UTC every day (≈ 07:30 IST)
+    - cron: "0 2 * * *"
+  workflow_dispatch:   # allows manual trigger
+
+permissions:
+  contents: write      # needed to commit updated DB + figures
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # ── Pipeline stages ──────────────────────────────────────────────────
+      - name: Ingest
+        env:
+          DATA_GOV_IN_API_KEY: ${{ secrets.DATA_GOV_IN_API_KEY }}
+        run: python -m src.ingest.run_all
+
+      - name: Clean
+        run: python -m src.clean.run_all
+
+      - name: Model
+        run: python -m src.model.run_all
+
+      - name: Test
+        run: pytest tests/ -v --tb=short
+        # Fail the whole workflow if any test fails
+
+      - name: Generate figures
+        run: python -m src.viz.generate_all
+
+      - name: Write RESULTS.md
+        run: python -m src.model.write_results
+
+      # ── Commit artefacts back to repo ────────────────────────────────────
+      - name: Commit updated artefacts
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/energy.db docs/figures/ RESULTS.md || true
+          git diff --cached --quiet || git commit -m "chore: scheduled pipeline refresh $(date -u +%Y-%m-%d)"
+          git push
