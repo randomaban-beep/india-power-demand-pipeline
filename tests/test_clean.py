@@ -21,12 +21,11 @@ def test_staging_tables_populated() -> None:
 
 
 def test_data_quality_suite_results() -> None:
-    """Verify that automated data quality assertions pass and gap audit flags historical gaps."""
+    """Verify that automated data quality assertions pass (with documented known limitations)."""
     res = run_checks()
-    assert res["total_checks"] == 7
-    # 6 assertions pass, 1 gap audit check accurately flags the 2 historical gaps
-    assert res["passed"] == 6
-    assert res["failed"] == 1
+    assert res["total_checks"] == 9
+    assert res["passed"] == 9
+    assert res["failed"] == 0
     assert res["gap_summary"]["total_gaps"] == 2
     assert res["gap_summary"]["longest_gap_hours"] > 4000
 

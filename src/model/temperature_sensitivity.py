@@ -162,6 +162,7 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
             "se_hc1": choice["se_hc1"],
             "ci_lower": int(round(choice["ci_lower"])),
             "ci_upper": int(round(choice["ci_upper"])),
+            "r2": choice["r2_full"],
             "r2_ctrl": choice["r2_ctrl"],
             "r2_full": choice["r2_full"],
             "delta_r2": choice["delta_r2"],

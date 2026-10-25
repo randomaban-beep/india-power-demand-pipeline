@@ -397,8 +397,10 @@ def fig9_data_quality() -> Path:
     checks_df = pd.read_sql("""
         SELECT check_name, status, details
         FROM data_quality_checks
-        ORDER BY id DESC
-        LIMIT 7
+        WHERE id IN (
+            SELECT MAX(id) FROM data_quality_checks GROUP BY check_name
+        )
+        ORDER BY check_name
     """, conn)
     
     gap_info = get_gap_summary(conn)

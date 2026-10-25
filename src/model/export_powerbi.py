@@ -76,3 +76,4 @@ def export_slim_db() -> Path:
 
 if __name__ == "__main__":
     export_powerbi_tables()
+    export_slim_db()

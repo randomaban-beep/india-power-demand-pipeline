@@ -33,13 +33,21 @@
 - **DOI:** [10.17632/y58jknpgs8.2](https://doi.org/10.17632/y58jknpgs8.2)
 - **Authors / Contributors:** Debanjan Mukherjee, Karuna Kalita, Subhash Kumar (IIT Guwahati & Grid Controller of India)
 - **License:** Creative Commons Attribution 4.0 International (CC BY 4.0) — verified on Mendeley repository page.
+- **Measurement Methodology:** PMU / SCADA telemetry (Phasor Measurement Unit and Supervisory Control and Data Acquisition telemetry from regional/national load despatch centers).
+- **Temporal Coverage:** 966 distinct days of hourly data (23,184 hourly observations spanning `2021-09-01T00:00` to `2025-06-24T23:00`).
+  - **Per-Year Coverage Breakdown:**
+    - `2021`: 122 days (Sept – Dec)
+    - `2022`: 273 days (Jan – Sept)
+    - `2023`: 30 days (April)
+    - `2024`: 366 days (Full leap year)
+    - `2025`: 175 days (Jan – June 24)
+    - **Total:** 966 days
 - **Repository Structure & Ingestion Details:**
   - In version 2 of the dataset, 29 separate spreadsheet files are hosted across distinct logging campaigns:
     1. **Sept 2021 – Sept 2022:** Monthly Excel files containing 5-minute SCADA telemetry (`TOTAL_THM_ONLY|P`, `TOTAL_NLDC_HYD|P`, `TOTAL_NLDC_GAS|P`, `TOTAL_NLDC_NPC|P`, `ALL_INDIA_WIND|P`, `ALL_IND_SOLAR|P`). Aggregated to 1-hour intervals (9,480 rows).
     2. **Oct 2022 – Dec 2023:** 10-second ultra-high-resolution SCADA telemetry files (~48 MB per monthly file, >260,000 rows each), from which April 2023 was bundled in standard size (720 rows).
     3. **Jan 2024 – June 2025:** Pre-aggregated 1-hour interval national SCADA dataset in `January 2024- June 2025.xlsx` under sheet `'Report'` with columns `Timestamp`, `Demand (MW)`, `Wind (MW)`, `Solar (MW)`, and `Total Generation (MW)` (12,984 rows).
-  - **Total Rows Ingested:** 23,184 rows spanning from `2021-09-01T00:00` to `2025-06-24T23:00`.
-  - **Temporal Continuity & Repository Gaps:**
+  - **Temporal Continuity & Documented Repository Limitations:**
     - Gap 1: `2022-09-30 23:00` to `2023-04-01 00:00` (4,369 hours, spanning winter 2022-23 and post-monsoon).
     - Gap 2: `2023-04-30 23:00` to `2024-01-01 00:00` (5,881 hours, spanning monsoon and post-monsoon 2023).
     - Both gaps are inherent to the published Mendeley dataset repository file availability, audited by `src/clean/quality_checks.py`, and recorded transparently in `RESULTS.md` and Chart 9.

@@ -3,9 +3,9 @@
 [![Daily Pipeline Refresh](https://github.com/randomaban-beep/india-power-demand-pipeline/actions/workflows/refresh.yml/badge.svg)](https://github.com/randomaban-beep/india-power-demand-pipeline/actions/workflows/refresh.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-brightgreen.svg)](https://www.python.org/)
-[![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](data/energy.db)
+[![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](data/energy_marts.db)
 
-An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical SCADA telemetry, and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and an interactive Streamlit dashboard.
+An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical PMU / SCADA telemetry (Mendeley DOI: 10.17632/y58jknpgs8.2), and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and an interactive Streamlit dashboard.
 
 ---
 
@@ -15,12 +15,12 @@ An automated, end-to-end data engineering and analytics pipeline tracking India'
 
 | Finding | Metric / Evidence | Strategic Takeaway ("So What") |
 |---|---|---|
-| **Controlled Temperature Elasticity** | **+{{COOLING_SLOPE_MW}} MW / °C** above 25°C base (95% CI: [{{COOLING_CI_LOWER}}, {{COOLING_CI_UPPER}}] MW/°C, $R^2={{COOLING_R2}}$) | Every 1°C heatwave across Indian urban centers adds over 8 GW of instantaneous national peak cooling demand, controlling for weekday, month, and year trend. |
+| **Controlled Temperature Elasticity** | **+{{COOLING_SLOPE_MW}} MW / °C** above 25°C base (95% CI: [{{COOLING_CI_LOWER}}, {{COOLING_CI_UPPER}}] MW/°C, White's HC1 SE: {{COOLING_SE_HC1}} MW/°C; controls $R^2={{COOLING_R2_CTRL}}$, full $R^2={{COOLING_R2_FULL}}$, incremental $\Delta R^2=+{{COOLING_DELTA_R2}}$ across {{COOLING_N_DAYS}} cooling days) | Controlling for day-of-week, month, and multi-year economic trend, every 1°C increase above 25°C adds over 8 GW of national peak cooling demand. Temperature alone accounts for an incremental +{{COOLING_DELTA_R2}} of variance beyond seasonal/trend controls. |
 | **Midday Solar Suppression** | **~{{MIDDAY_SOLAR_BELLY_MW}} MW** midday solar belly depth | Midday net load is significantly depressed during summer months, requiring steep thermal ramp-downs followed by aggressive evening ramp-ups. |
-| **Grid Ramping Stress** | **{{MAX_1H_RAMP_MW}} MW** maximum 1-hour ramp (99th percentile: **{{P99_1H_RAMP_MW}} MW**) | Solar sunset coinciding with evening industrial and domestic peak requires flexible ramping capacity (hydro, pumped storage, gas, battery storage). |
-| **Renewable Penetration** | **{{RE_AVG_SHARE}}%** average daily generation (peaking at **{{RE_PEAK_SHARE}}%**) | Solar and wind generation are actively reshaping the diurnal load curve across all five regional grids. |
-| **Peak Demand Benchmark** | **{{PEAK_HOURLY_DEMAND_MW}} MW** in hourly window ({{PEAK_HOURLY_DATE}}) | All-time national peak demand met recorded in Grid-India daily reports reached **{{ALL_TIME_GRID_PEAK_MW}} MW** ({{ALL_TIME_GRID_PEAK_DATE}}). |
-| **Data Quality & Integrity** | **{{DROPOUTS_REMOVED}} dropouts nullified**; **{{TOTAL_GAPS_COUNT}} historical gaps audited** | High-frequency telemetry contains 2 multi-month gaps in the historical archive; {{DROPOUTS_REMOVED}} sensor dropouts were isolated and nullified (never silently interpolated). |
+| **Grid Ramping Stress** | **{{P99_1H_RAMP_MW}} MW** 99th percentile 1-hour ramp; **{{MEDIAN_DAILY_MAX_RAMP_MW}} MW** median daily peak ramp | Solar sunset coinciding with evening industrial and domestic peak creates predictable tail ramping stress; maximum clean 1-hour ramp verified at **{{MAX_1H_RAMP_MW}} MW** after isolating sensor glitches. |
+| **Renewable Penetration** | **{{RE_AVG_SHARE}}%** average daily generation share (peaking at **{{RE_PEAK_SHARE}}%** on 2025-05-31) | Cross-validated against official Grid-India daily reports (Pearson $r = {{RE_CROSS_CORR}}$, mean difference {{RE_CROSS_DIFF}}%). Solar and wind generation are actively reshaping the diurnal load curve across all five regional grids. |
+| **Peak Demand Benchmark** | **{{PEAK_HOURLY_DEMAND_MW}} MW** in hourly dataset window ({{PEAK_HOURLY_DATE}}) | Highest demand met recorded among loaded Grid-India daily reports reached **{{ALL_TIME_GRID_PEAK_MW}} MW** ({{ALL_TIME_GRID_PEAK_DATE}}). |
+| **Data Quality & Telemetry Audit** | **{{DROPOUTS_REMOVED}} glitch hours nullified**; **{{TOTAL_GAPS_COUNT}} historical gaps audited** | High-frequency telemetry spans {{TOTAL_HOURLY_DAYS}} days ({{YEAR_BREAKDOWN}}); 2 documented multi-month gaps in the historical archive; dropouts and flatlined sensors were isolated and set to `NULL` (never silently interpolated). |
 
 ---
 
@@ -29,14 +29,18 @@ An automated, end-to-end data engineering and analytics pipeline tracking India'
 ### 1. Daily Demand Growth and Seasonality
 Continuous time-series tracking daily average demand, 7-day rolling baseline, and dataset peak demand.
 ![Daily Demand](docs/figures/01_daily_demand.png)
-*Takeaway: Demonstrates persistent summer peak escalation (reaching {{PEAK_HOURLY_DEMAND_MW}} MW in the hourly dataset and {{ALL_TIME_GRID_PEAK_MW}} MW in national daily reports) contrasted with winter base troughs (~{{WINTER_TROUGH_MW}} MW).*
+*Takeaway: Demonstrates persistent summer peak escalation (reaching {{PEAK_HOURLY_DEMAND_MW}} MW in the hourly dataset and {{ALL_TIME_GRID_PEAK_MW}} MW in loaded national daily reports) contrasted with winter base troughs (~{{WINTER_TROUGH_MW}} MW).*
 
 ---
 
 ### 2. Controlled Temperature Sensitivity of Electricity Demand
 Daily peak demand regressed against multi-city daily mean temperature, with categorical controls for weekday, month, and year trend.
 ![Temperature vs Demand](docs/figures/02_temp_vs_demand.png)
-*Takeaway: Daily peak demand expands at +{{COOLING_SLOPE_MW}} MW/°C (95% CI: [{{COOLING_CI_LOWER}}, {{COOLING_CI_UPPER}}] MW/°C, $R^2={{COOLING_R2}}$, $N={{COOLING_N_DAYS}}$ cooling days) above the 25.0°C cooling balance point.*
+*Takeaway: Daily peak demand expands at +{{COOLING_SLOPE_MW}} MW/°C (95% CI: [{{COOLING_CI_LOWER}}, {{COOLING_CI_UPPER}}] MW/°C, White's HC1 SE: {{COOLING_SE_HC1}} MW/°C, full model $R^2={{COOLING_R2_FULL}}$, incremental $\Delta R^2=+{{COOLING_DELTA_R2}}$, $N={{COOLING_N_DAYS}}$ cooling days) above the 25.0°C cooling balance point.*
+
+#### Candidate Threshold Sensitivity Analysis (22°C to 28°C)
+
+{{THRESHOLD_TABLE}}
 
 ---
 
@@ -71,21 +75,21 @@ Year-over-year peak demand comparison across calendar months.
 ### 7. Demand Anomaly Detection
 Identification of statistically anomalous grid demand days exceeding $\pm 2\sigma$ from same-season and same-weekday norms.
 ![Anomaly Days](docs/figures/07_anomaly_days.png)
-*Takeaway: Identified {{REAL_ANOMALIES_COUNT}} real demand anomaly days (e.g., severe heatwave days during April 2023) cleanly separated from data-quality sensor dropout days.*
+*Takeaway: Identified {{REAL_ANOMALIES_COUNT}} real demand anomaly days cleanly separated from data-quality sensor dropout and flatline days.*
 
 ---
 
 ### 8. Hourly Net Load Ramp Distribution
 Histogram of hour-to-hour net load changes computed strictly between consecutive non-glitch hours exactly 1 hour apart.
 ![Net Load Ramps](docs/figures/08_net_load_ramps.png)
-*Takeaway: Maximum clean 1-hour ramp is {{MAX_1H_RAMP_MW}} MW (99th percentile: {{P99_1H_RAMP_MW}} MW). Sensor dropout glitches that previously reported fake 80,000+ MW ramps have been filtered and isolated.*
+*Takeaway: 99th percentile 1-hour ramp is {{P99_1H_RAMP_MW}} MW, with a median daily maximum ramp of {{MEDIAN_DAILY_MAX_RAMP_MW}} MW (maximum clean 1-hour ramp: {{MAX_1H_RAMP_MW}} MW). Telemetry flatlines and unfreeze spikes that previously reported fake 80,000+ MW ramps have been filtered and isolated.*
 
 ---
 
 ### 9. Pipeline Reliability and Data Completeness
 Automated data quality assertion suite, records per architectural layer, and gap audit summary.
 ![Data Quality](docs/figures/09_data_quality.png)
-*Takeaway: {{DQ_PASSED_CHECKS}} of {{DQ_TOTAL_CHECKS}} automated assertion checks pass. The {{TOTAL_GAPS_COUNT}} historical multi-month gaps in the Mendeley dataset (longest: {{LONGEST_GAP_HOURS}}h) and {{DROPOUTS_REMOVED}} sensor dropouts are audited and reported with complete transparency.*
+*Takeaway: {{DQ_PASSED_CHECKS}} of {{DQ_TOTAL_CHECKS}} automated assertion checks pass. The {{TOTAL_GAPS_COUNT}} documented historical multi-month gaps in the Mendeley dataset (longest: {{LONGEST_GAP_HOURS}}h) and {{DROPOUTS_REMOVED}} sensor glitches are audited and reported with complete transparency.*
 
 ---
 
@@ -142,11 +146,11 @@ Automated data quality assertion suite, records per architectural layer, and gap
 | Source | Description | Coverage Span | License / Terms |
 |---|---|---|---|
 | [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | {{DAILY_SPAN_START}} to {{DAILY_SPAN_END}} ({{TOTAL_DAILY_REPORTS}} reports) | Public Indian government data |
-| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated SCADA telemetry for demand, solar, and wind generation | {{HOURLY_SPAN_START}} to {{HOURLY_SPAN_END}} ({{TOTAL_STORED_HOURS}} hours; 2 multi-month gaps) | CC BY 4.0 (Attribution 4.0 International) |
+| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated PMU / SCADA telemetry for demand, solar, and wind generation | {{HOURLY_SPAN_START}} to {{HOURLY_SPAN_END}} ({{TOTAL_STORED_HOURS}} hours across {{TOTAL_HOURLY_DAYS}} days: {{YEAR_BREAKDOWN}}) | CC BY 4.0 (Attribution 4.0 International) |
 | [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
 
 > *Note on Weather Data:* Open-Meteo provides atmospheric data via ECMWF ERA5 numerical model reanalysis simulations, rather than physical surface weather station observations.
-> *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
+> *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 documented multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
 
 ---
 
