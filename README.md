@@ -5,7 +5,7 @@
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-brightgreen.svg)](https://www.python.org/)
 [![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](data/energy_marts.db)
 
-An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical PMU / SCADA telemetry (Mendeley DOI: 10.17632/y58jknpgs8.2), and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and an interactive Streamlit dashboard.
+An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical PMU / SCADA telemetry (Mendeley DOI: 10.17632/y58jknpgs8.2), and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and a custom responsive web application with FastAPI and Apache ECharts.
 
 ---
 
@@ -239,14 +239,50 @@ python -m src.model.write_results
 pytest tests/ -v
 ```
 
-### 3. Launch Interactive Dashboard
+### 3. Launch Custom Web Application & API
 ```bash
-streamlit run app/streamlit_app.py
+uvicorn server.main:app --reload --port 8000
+```
+Open [http://localhost:8000](http://localhost:8000) in your browser. Interactive Swagger API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs).
+
+---
+
+## 🌐 Live Website & Cloud Deployment
+
+- **Live URL:** `https://india-power-demand-pipeline.onrender.com` *(Deployment URL placeholder)*
+- **Interactive API Docs:** `https://india-power-demand-pipeline.onrender.com/docs`
+
+### Cloud Deployment (Render / Docker)
+The application includes a production-ready `Dockerfile` and `render.yaml` for automated deployment on Render's free tier:
+1. Connect this repository to [Render](https://render.com).
+2. Create a **Web Service** selecting this repository.
+3. Render automatically detects `render.yaml` and deploys with:
+   - Build Command: `pip install -r requirements.txt`
+   - Start Command: `uvicorn server.main:app --host 0.0.0.0 --port $PORT`
+
+Alternatively, run with Docker locally:
+```bash
+docker build -t india-power-pipeline .
+docker run -p 8000:8000 india-power-pipeline
 ```
 
 ---
 
-## 🌐 Live Interactive Dashboard
+## 🔌 API Endpoints Reference
 
-Access the interactive dashboard:
-👉 **[Launch Streamlit Dashboard](https://share.streamlit.io/)** *(or run locally with `streamlit run app/streamlit_app.py`)*
+All analytical endpoints accept optional parameters: `?from=YYYY-MM-DD&to=YYYY-MM-DD&seasons=Summer,Winter`.
+
+| Endpoint | Method | Description | Source Mart / Model |
+|---|---|---|---|
+| `/api/summary` | `GET` | Headline operational KPIs (latest/record peak, RE share, record counts, audit status) | `stg_daily_psp`, `mart_temp_vs_demand`, `pipeline_runs` |
+| `/api/daily-demand` | `GET` | Daily average and peak demand met with 7-day rolling baseline | `mart_anomaly_days` |
+| `/api/monthly-peaks` | `GET` | Monthly peak demand escalation and year-over-year percentage growth | `mart_monthly_peak_demand` |
+| `/api/temp-demand` | `GET` | Hourly temperature vs demand response with median 1°C bins (`?feature=avg_temperature_c\|delhi_temp_c\|mumbai_temp_c`) | `mart_temp_vs_demand` |
+| `/api/heatmap` | `GET` | 12×24 matrix of average demand across calendar months and diurnal hours | `mart_temp_vs_demand` |
+| `/api/sensitivity` | `GET` | Full-sample hinge OLS cooling sensitivity model parameters, robust HC1 SEs, and candidate thresholds | `compute_temperature_sensitivity()` |
+| `/api/duck-curve` | `GET` | Diurnal generation profile (demand, solar, wind, net load) and dusk ramping metrics (`?season=All\|Summer\|...`) | `mart_net_load_profile` |
+| `/api/re-share` | `GET` | Monthly average renewable penetration share and capacity breakdown | `mart_net_load_profile` |
+| `/api/anomalies` | `GET` | Daily z-score series segmented by real demand outliers (±2σ) and isolated data glitches | `mart_anomaly_days` |
+| `/api/ramps` | `GET` | Top 10 one-hour net-load ramping stress events cross-checked with Grid-India daily peak met | `mart_net_load_ramps`, `stg_daily_psp` |
+| `/api/health` | `GET` | Automated data quality assertions, pipeline execution audit log, and database table volume | `data_quality_checks`, `pipeline_runs` |
+| `/api/export/{name}.csv` | `GET` | Parameterised CSV streaming download for analytical marts (`daily-demand`, `anomalies`, `ramps`, `monthly-peaks`) | `server/queries.py` |
