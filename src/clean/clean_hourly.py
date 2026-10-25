@@ -5,12 +5,12 @@ Implements:
 2. Stuck-sensor detector (runs >= 3 consecutive hours of identical non-zero values for demand, solar, wind).
 3. Night solar glitch detector (> 500 MW between 20:00 and 05:00 IST).
 4. Unphysical wind spike detector (> 35,000 MW, e.g. 2022-08-11).
-5. Sensor dropout and glitch isolation:
+5. Multi-hour dropout and glitch isolation:
    - Physical plausible bounds [50,000, 350,000] MW.
-   - Sensor freeze/unfreeze transition protection.
-   - Sudden plunges > 25% below neighbouring hours.
+   - Multi-hour dropout detection (dips of 1, 2, 3, or 4 hours dropping significantly below surrounding baseline and rebounding).
    - Single-hour dip (10-25%) and sharp recovery.
    - Hour-of-day rolling median outlier filter (+/- 7 day window).
+   - Unfreeze transition protection: nullifying the first hour immediately following a stuck run or dropout to eliminate artificial unfreeze jump ramps.
 6. Net load calculation: demand_mw - (solar_mw + wind_mw), strictly NULL if any component is invalid.
 """
 
@@ -47,7 +47,7 @@ def clean_hourly_demand() -> dict[str, Any]:
         log.warning("raw_hourly_demand is empty, skipping cleaning.")
         return {}
 
-    # Dates and hours
+    dt_series = pd.to_datetime(df["timestamp_ist"])
     df["date_ist"] = df["timestamp_ist"].str[:10]
     df["hour_ist"] = df["timestamp_ist"].str[11:13].astype(int)
 
@@ -90,46 +90,52 @@ def clean_hourly_demand() -> dict[str, Any]:
     df["clean_solar_mw"] = np.where(df["is_stuck_solar_mw"] | df["is_night_solar"], np.nan, df["solar_mw"])
     df["clean_wind_mw"] = np.where(df["is_stuck_wind_mw"] | df["is_wind_spike"], np.nan, df["wind_mw"])
 
-    # 4. Demand glitch & dropout detection
+    # 4. Physical limits
     bound_fail = df["raw_calc_demand_mw"].isna() | (df["raw_calc_demand_mw"] < 50000) | (df["raw_calc_demand_mw"] > 350000)
     stuck_demand = df["is_stuck_raw_calc_demand_mw"]
-    unfreeze_trans = df["is_stuck_raw_calc_demand_mw"].shift(1, fill_value=False)
 
-    prev_d = df["raw_calc_demand_mw"].shift(1)
-    next_d = df["raw_calc_demand_mw"].shift(-1)
-    dt_series = pd.to_datetime(df["timestamp_ist"])
-    consec_prev = (dt_series - dt_series.shift(1)) == pd.Timedelta(hours=1)
-    consec_next = (dt_series.shift(-1) - dt_series) == pd.Timedelta(hours=1)
+    # 5. Multi-hour dropout detection (dips of L = 1, 2, 3, or 4 hours that drop significantly and rebound)
+    d_vals = df["raw_calc_demand_mw"].values
+    n = len(d_vals)
+    multi_hour_dip = np.zeros(n, dtype=bool)
 
-    drop_25 = (
-        consec_prev
-        & (df["raw_calc_demand_mw"] < 0.75 * prev_d)
-        & (~consec_next | next_d.isna() | (next_d < 50000) | (df["raw_calc_demand_mw"] < 0.75 * next_d))
-    ) | (
-        consec_next
-        & (df["raw_calc_demand_mw"] < 0.75 * next_d)
-        & (~consec_prev | prev_d.isna() | (prev_d < 50000) | (df["raw_calc_demand_mw"] < 0.75 * prev_d))
-    )
+    for L in [1, 2, 3, 4]:
+        for i in range(1, n - L):
+            if (dt_series.iloc[i + L] - dt_series.iloc[i - 1]) == pd.Timedelta(hours=L + 1):
+                before = d_vals[i - 1]
+                after = d_vals[i + L]
+                if before > 50000 and after > 50000:
+                    win = d_vals[i:i + L]
+                    # Condition 1: All values in window are < 0.90 of min(before, after)
+                    cond1 = np.all(win < 0.90 * min(before, after))
+                    # Condition 2: Deep plunge > 20 GW from before and rebounds > 15 GW to after
+                    cond2 = (before - np.min(win) > 20000) and (after - np.min(win) > 15000)
+                    # Condition 3: Significant drop > 12% and sharp recovery > 8%
+                    cond3 = np.all(win < 0.88 * before) and (after > 1.08 * np.min(win))
+                    if cond1 or cond2 or cond3:
+                        multi_hour_dip[i:i + L] = True
 
-    dip_recover = (
-        consec_prev
-        & consec_next
-        & (df["raw_calc_demand_mw"] < 0.90 * prev_d)
-        & (next_d > 1.10 * df["raw_calc_demand_mw"])
-    )
-
-    # Hour-of-day rolling median filter (+/- 7 day window = 15 days)
+    # 6. Hour-of-day rolling median filter (+/- 7 day window = 15 days)
     d_for_med = df["raw_calc_demand_mw"].copy()
-    d_for_med[bound_fail | stuck_demand | drop_25] = np.nan
+    d_for_med[bound_fail | stuck_demand | multi_hour_dip] = np.nan
     df["same_hour_roll_med"] = df.groupby("hour_ist")[d_for_med.name].transform(
         lambda s: s.rolling(15, center=True, min_periods=5).median()
     )
     ratio = df["raw_calc_demand_mw"] / df["same_hour_roll_med"]
-    hour_outlier = (ratio < 0.86) | (ratio > 1.22)
+    hour_outlier = (ratio < 0.87) | (ratio > 1.20)
 
-    is_glitch = bound_fail | stuck_demand | unfreeze_trans | drop_25 | dip_recover | hour_outlier
+    # 7. Unfreeze transition protection:
+    # Nullify the first hour immediately following a stuck run or dropout dip
+    unfreeze_trans = (
+        pd.Series(stuck_demand).shift(1, fill_value=False) |
+        pd.Series(multi_hour_dip).shift(1, fill_value=False) |
+        pd.Series(bound_fail).shift(1, fill_value=False)
+    )
+
+    is_glitch = bound_fail | stuck_demand | multi_hour_dip | hour_outlier | unfreeze_trans
 
     df["is_dropout"] = is_glitch.astype(int)
+    df["is_multi_hour_dip"] = multi_hour_dip.astype(int)
     df["is_stuck_solar"] = df["is_stuck_solar_mw"].astype(int)
     df["is_night_solar_glitch"] = df["is_night_solar"].astype(int)
     df["is_stuck_wind"] = df["is_stuck_wind_mw"].astype(int)
@@ -147,7 +153,7 @@ def clean_hourly_demand() -> dict[str, Any]:
         "timestamp_ist", "date_ist", "hour_ist",
         "thermal_mw", "hydro_mw", "gas_mw", "nuclear_mw",
         "wind_mw", "solar_mw", "demand_mw", "net_load_mw",
-        "is_dropout", "is_stuck_solar", "is_night_solar_glitch",
+        "is_dropout", "is_multi_hour_dip", "is_stuck_solar", "is_night_solar_glitch",
         "is_stuck_wind", "is_wind_spike", "is_stuck_demand", "source"
     ]
     out_df = df[output_cols].copy()
@@ -166,6 +172,7 @@ def clean_hourly_demand() -> dict[str, Any]:
         "valid_demand_rows": int(out_df["demand_mw"].notna().sum()),
         "valid_net_load_rows": int(out_df["net_load_mw"].notna().sum()),
         "demand_glitch_hours": int(out_df["is_dropout"].sum()),
+        "multi_hour_dip_hours": int(out_df["is_multi_hour_dip"].sum()),
         "stuck_solar_hours": int(out_df["is_stuck_solar"].sum()),
         "night_solar_glitch_hours": int(out_df["is_night_solar_glitch"].sum()),
         "stuck_wind_hours": int(out_df["is_stuck_wind"].sum()),
@@ -173,8 +180,8 @@ def clean_hourly_demand() -> dict[str, Any]:
         "stuck_demand_hours": int(out_df["is_stuck_demand"].sum()),
         "duration_s": dur
     }
-    log.info("stg_hourly_demand cleaned & loaded: %d rows in %ss (%d demand glitches, %d stuck solar, %d night solar, %d stuck wind, %d wind spikes)",
-             len(out_df), dur, stats["demand_glitch_hours"], stats["stuck_solar_hours"], stats["night_solar_glitch_hours"], stats["stuck_wind_hours"], stats["wind_spike_hours"])
+    log.info("stg_hourly_demand cleaned: %d rows in %ss (%d glitches, %d multi-hour dips, %d stuck solar, %d night solar, %d stuck wind, %d wind spikes)",
+             len(out_df), dur, stats["demand_glitch_hours"], stats["multi_hour_dip_hours"], stats["stuck_solar_hours"], stats["night_solar_glitch_hours"], stats["stuck_wind_hours"], stats["wind_spike_hours"])
     return stats
 
 

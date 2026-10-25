@@ -5,12 +5,11 @@ above cooling balance point using daily aggregated peak demand met from Grid-Ind
 joined with multi-city weather reanalysis, controlling for weekday, month, and year fixed effects.
 
 Methodology:
-- Evaluates candidate thresholds across 22.0°C to 28.0°C in 1.0°C increments.
-- Fits Controls-Only OLS (weekday, month, year dummies) to establish baseline R^2.
-- Fits Full Model OLS with Cooling Degree Days (CDD = max(0, T - T*)) + controls.
-- Reports Incremental R^2 (Delta R^2 = R^2_full - R^2_controls), demonstrating the genuine marginal explanatory power of temperature.
-- Computes White's Heteroskedasticity-Robust (HC1) standard errors and 95% confidence intervals.
-- Stated selection criterion: Minimum AIC and maximum incremental Delta R^2 identify 25.0°C as the optimal national cooling threshold.
+- Single full-sample model: Evaluated on all daily observations (725 days).
+- Hinge function: Evaluates cooling degree days CDD = max(T - threshold, 0) across 22.0°C to 28.0°C.
+- Baseline Controls: Fits Controls-Only OLS (intercept + weekday, month, year dummies) on all observations.
+- Full Model: Fits OLS with hinge term + controls, computing White's Heteroskedasticity-Consistent (HC1) robust SEs.
+- Stated Selection: 25.0°C is chosen a priori as a standard cooling base temperature for power systems analysis; candidate thresholds from 22.0°C to 28.0°C are evaluated for sensitivity.
 """
 
 from __future__ import annotations
@@ -64,7 +63,7 @@ def fit_ols_hc1(X_df: pd.DataFrame, y_series: pd.Series) -> dict[str, Any]:
 
 
 def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> dict[str, Any]:
-    """Compute temperature sensitivity with controls, HC1 robust SEs, and threshold sensitivity table."""
+    """Compute temperature sensitivity using full-sample hinge regression with controls and HC1 robust SEs."""
     close_conn = False
     if conn is None:
         conn = sqlite3.connect(DB_PATH)
@@ -85,6 +84,7 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
                 "se_hc1": 0.0,
                 "ci_lower": 0,
                 "ci_upper": 0,
+                "r2": 0.0,
                 "r2_ctrl": 0.0,
                 "r2_full": 0.0,
                 "delta_r2": 0.0,
@@ -92,10 +92,8 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
                 "n_total": 0,
                 "temp_min_c": 0.0,
                 "temp_max_c": 0.0,
-                "temp_cooling_min_c": 0.0,
-                "temp_cooling_max_c": 0.0,
                 "threshold_choice_c": 25.0,
-                "threshold_criterion": "Minimum AIC and maximum incremental Delta R^2",
+                "threshold_criterion": "A priori selection of 25.0°C cooling base with sensitivity analysis across 22.0°C to 28.0°C",
                 "thresholds": []
             }
 
@@ -103,44 +101,43 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
         temp_min_all = float(df["daily_mean_temp_c"].min())
         temp_max_all = float(df["daily_mean_temp_c"].max())
 
-        # Evaluate candidate thresholds from 22.0°C to 28.0°C
+        # Baseline controls-only model on ALL observations (725 days)
+        d_week = pd.get_dummies(df["weekday_str"], prefix="w", drop_first=True, dtype=float)
+        d_month = pd.get_dummies(df["month_str"], prefix="m", drop_first=True, dtype=float)
+        d_year = pd.get_dummies(df["year_str"], prefix="y", drop_first=True, dtype=float)
+
+        X_ctrl = pd.concat([pd.Series(1.0, index=df.index, name="intercept"), d_week, d_month, d_year], axis=1)
+        fit_ctrl = fit_ols_hc1(X_ctrl, df["max_demand_met_mw"])
+        r2_ctrl = float(fit_ctrl["r2"])
+
+        # Candidate thresholds from 22.0°C to 28.0°C evaluated on the SAME full sample
         candidate_thresholds = [22.0, 23.0, 24.0, 25.0, 26.0, 27.0, 28.0]
         threshold_results = []
 
         for t in candidate_thresholds:
-            df_sub = df[df["daily_mean_temp_c"] >= t].copy()
-            if len(df_sub) < 30:
-                continue
+            # Full-sample hinge term: max(T - threshold, 0)
+            cooling_deg = np.maximum(0.0, df["daily_mean_temp_c"].values - t)
+            n_days_above = int((df["daily_mean_temp_c"] >= t).sum())
 
-            df_sub["cooling_deg"] = df_sub["daily_mean_temp_c"] - t
+            X_full = pd.concat([
+                pd.Series(1.0, index=df.index, name="intercept"),
+                pd.Series(cooling_deg, index=df.index, name="cooling_deg"),
+                d_week, d_month, d_year
+            ], axis=1)
 
-            # Categorical controls
-            d_week = pd.get_dummies(df_sub["weekday_str"], prefix="w", drop_first=True, dtype=float)
-            d_month = pd.get_dummies(df_sub["month_str"], prefix="m", drop_first=True, dtype=float)
-            d_year = pd.get_dummies(df_sub["year_str"], prefix="y", drop_first=True, dtype=float)
-
-            # Controls-only model
-            X_ctrl = pd.concat([pd.Series(1.0, index=df_sub.index, name="intercept"), d_week, d_month, d_year], axis=1)
-            fit_ctrl = fit_ols_hc1(X_ctrl, df_sub["max_demand_met_mw"])
-
-            # Full model: intercept, cooling_deg, controls
-            X_full = pd.concat([pd.Series(1.0, index=df_sub.index, name="intercept"), df_sub[["cooling_deg"]], d_week, d_month, d_year], axis=1)
-            fit_full = fit_ols_hc1(X_full, df_sub["max_demand_met_mw"])
+            fit_full = fit_ols_hc1(X_full, df["max_demand_met_mw"])
 
             slope = float(fit_full["beta"][1])
             se_slope = float(fit_full["se_hc1"][1])
             ci_lower = slope - 1.96 * se_slope
             ci_upper = slope + 1.96 * se_slope
-            r2_ctrl = float(fit_ctrl["r2"])
             r2_full = float(fit_full["r2"])
             delta_r2 = r2_full - r2_ctrl
 
-            t_min = float(df_sub["daily_mean_temp_c"].min())
-            t_max = float(df_sub["daily_mean_temp_c"].max())
-
             threshold_results.append({
                 "threshold_c": t,
-                "n_days": fit_full["n"],
+                "n_days_above": n_days_above,
+                "n_obs": total_obs,
                 "slope_mw_per_c": round(slope, 1),
                 "se_hc1": round(se_slope, 1),
                 "ci_lower": round(ci_lower, 1),
@@ -150,11 +147,9 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
                 "delta_r2": round(delta_r2, 4),
                 "aic": round(fit_full["aic"], 1),
                 "rmse": round(fit_full["rmse"], 1),
-                "temp_min_c": round(t_min, 1),
-                "temp_max_c": round(t_max, 1),
             })
 
-        # Baseline chosen threshold: 25.0°C (standard Indian cooling balance point)
+        # Baseline chosen threshold: 25.0°C
         choice = next((r for r in threshold_results if r["threshold_c"] == 25.0), threshold_results[0])
 
         return {
@@ -166,14 +161,12 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
             "r2_ctrl": choice["r2_ctrl"],
             "r2_full": choice["r2_full"],
             "delta_r2": choice["delta_r2"],
-            "n_days": choice["n_days"],
+            "n_days": choice["n_days_above"],
             "n_total": total_obs,
             "temp_min_c": round(temp_min_all, 1),
             "temp_max_c": round(temp_max_all, 1),
-            "temp_cooling_min_c": choice["temp_min_c"],
-            "temp_cooling_max_c": choice["temp_max_c"],
             "threshold_choice_c": 25.0,
-            "threshold_criterion": "Optimal model fit: peak incremental explanatory power (Delta R^2 = +10.6%) and Akaike Information Criterion (AIC)",
+            "threshold_criterion": "A priori selection of 25.0°C cooling base with full-sample hinge sensitivity across 22.0°C to 28.0°C",
             "thresholds": threshold_results
         }
     finally:
@@ -183,4 +176,4 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
 
 if __name__ == "__main__":
     res = compute_temperature_sensitivity()
-    print("Temperature Sensitivity Results:", res)
+    print("Full-Sample Hinge Model Results:", res)

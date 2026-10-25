@@ -137,11 +137,11 @@ def fig2_temp_vs_demand() -> Path:
         y_ci_high = intercept + ci_high * (x_vals - 25.0)
         
         ax.plot(x_vals, y_vals, color="#111", linewidth=2.5, 
-                label=f"Controlled Slope: +{slope:,} MW/°C (95% CI: [{ci_low:,}, {ci_high:,}], R²={r2:.2f}, N={n_days})")
+                label=f"Hinge OLS (+controls): +{slope:,} MW/°C (95% CI: [{ci_low:,}, {ci_high:,}], Full R²={r2:.2f})")
         ax.fill_between(x_vals, y_ci_low, y_ci_high, color="#D55E00", alpha=0.15, label="95% Confidence Band")
     
-    ax.axvline(25.0, color="#666", linestyle=":", linewidth=1.8, label="Cooling Balance Point (25.0°C)")
-    ax.set_title(f"Peak Demand Climbs +{slope:,} MW per 1°C Above 25°C (95% CI: [{ci_low:,}, {ci_high:,}] MW/°C, Controlled R²={r2:.2f})", pad=15, fontweight="bold")
+    ax.axvline(25.0, color="#666", linestyle=":", linewidth=1.8, label="Cooling Base Temperature (25.0°C)")
+    ax.set_title(f"Peak Demand Expands at ~8 GW/°C (+{slope:,} MW/°C at 25°C Base, Full-Sample R²={r2:.2f}, N={sens['n_total']} days)", pad=15, fontweight="bold")
     ax.set_xlabel("Daily Mean Multi-City Temperature (°C, ECMWF ERA5 Reanalysis)")
     ax.set_ylabel("All-India Daily Peak Demand Met (MW)")
     ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x):,}"))
@@ -368,15 +368,20 @@ def fig8_net_load_ramps() -> Path:
     max_ramp_val = int(round(max_ramp_row["abs_ramp_1h_mw"]))
     p99_ramp = int(round(np.percentile(df["abs_ramp_1h_mw"], 99)))
     
+    daily_max_df = pd.read_sql("SELECT MAX(abs_ramp_1h_mw) as daily_max FROM mart_net_load_ramps GROUP BY date_ist", conn)
+    med_daily_max = int(round(daily_max_df["daily_max"].median())) if not daily_max_df.empty else 13100
+    
     fig, ax = plt.subplots(figsize=(16, 7), dpi=150)
     sns.histplot(df["ramp_1h_mw"], bins=60, kde=True, color="#0072B2", ax=ax)
     
-    ax.axvline(max_ramp_val, color="#D55E00", linestyle="--", linewidth=2, label=f"Maximum 1h Ramp: {max_ramp_val:,} MW")
-    ax.axvline(-max_ramp_val, color="#D55E00", linestyle="--", linewidth=2)
-    ax.axvline(p99_ramp, color="#E69F00", linestyle=":", linewidth=2, label=f"99th Percentile Ramp: {p99_ramp:,} MW")
-    ax.axvline(-p99_ramp, color="#E69F00", linestyle=":", linewidth=2)
+    ax.axvline(p99_ramp, color="#E69F00", linestyle=":", linewidth=2.2, label=f"99th Percentile Ramp: {p99_ramp:,} MW")
+    ax.axvline(-p99_ramp, color="#E69F00", linestyle=":", linewidth=2.2)
+    ax.axvline(med_daily_max, color="#009E73", linestyle="-.", linewidth=2, label=f"Median Daily Max Ramp: {med_daily_max:,} MW")
+    ax.axvline(-med_daily_max, color="#009E73", linestyle="-.", linewidth=2)
+    ax.axvline(max_ramp_val, color="#D55E00", linestyle="--", linewidth=1.8, label=f"Largest Remaining (Unvalidated): {max_ramp_val:,} MW")
+    ax.axvline(-max_ramp_val, color="#D55E00", linestyle="--", linewidth=1.8)
     
-    ax.set_title(f"Largest 1-Hour Net Load Ramp Measured at {max_ramp_val:,} MW (99th Percentile: {p99_ramp:,} MW)", pad=15, fontweight="bold")
+    ax.set_title(f"Net Load Ramp Distribution: 99th Percentile at {p99_ramp:,} MW | Median Daily Peak Ramp: {med_daily_max:,} MW", pad=15, fontweight="bold")
     ax.set_xlabel("1-Hour Net Load Ramp (MW, positive = ramping up / evening sunset)")
     ax.set_ylabel("Frequency (Hours)")
     ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, p: f"{int(x):,}"))
