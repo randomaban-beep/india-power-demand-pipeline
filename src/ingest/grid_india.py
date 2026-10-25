@@ -288,7 +288,7 @@ def parse_pdf_psp(pdf_content: bytes, filename: str = "") -> tuple[dict[str, Any
     return all_india, []
 
 
-def backfill_daily_psp(limit_total: int = 500, max_workers: int = 8) -> tuple[int, int]:
+def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[int, int]:
     """Backfill historical daily PSP reports across all available years (2021 to 2026)."""
     init_db()
     create_raw_tables()
@@ -317,11 +317,10 @@ def backfill_daily_psp(limit_total: int = 500, max_workers: int = 8) -> tuple[in
             date_to_file[date_key] = item
 
     items_to_process = list(date_to_file.values())
-    if len(items_to_process) > limit_total:
-        step = max(1, len(items_to_process) // limit_total)
-        items_to_process = items_to_process[::step][:limit_total]
+    if limit_total and len(items_to_process) > limit_total:
+        items_to_process = items_to_process[:limit_total]
 
-    log.info("Selected %d daily PSP files to backfill across %s", len(items_to_process), sorted(list(valid_years)))
+    log.info("Selected %d daily PSP files to backfill without stride across %s", len(items_to_process), sorted(list(valid_years)))
 
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0"}
