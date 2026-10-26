@@ -5,7 +5,7 @@
 [![Python 3.11](https://img.shields.io/badge/Python-3.11-brightgreen.svg)](https://www.python.org/)
 [![Database: SQLite](https://img.shields.io/badge/Database-SQLite-lightgrey.svg)](data/energy_marts.db)
 
-An automated, end-to-end data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Ingests daily reports from Grid Controller of India (Grid-India / POSOCO), historical PMU / SCADA telemetry (Mendeley DOI: 10.17632/y58jknpgs8.2), and hourly ECMWF ERA5 reanalysis weather data; cleans and models data in SQLite; refreshes via GitHub Actions; and renders publication-ready visualisations and a custom responsive web application with FastAPI and Apache ECharts.
+An automated data engineering and analytics pipeline tracking India's electricity demand, fuel-wise generation, and weather variables across multi-year operating horizons. Daily operational data (Grid-India / POSOCO daily PSP reports) and multi-city ERA5 reanalysis weather (Open-Meteo) update continuously via GitHub Actions; high-frequency PMU / SCADA telemetry (Mendeley DOI: 10.17632/y58jknpgs8.2) is preserved as a static historical research archive (2021–2025). The pipeline cleans and models data in SQLite; validates data integrity via automated quality assertions and sanity guards; persists the rolling state to a GitHub release asset (`energy.db.gz`); and renders publication-ready visualisations and a custom responsive web application with FastAPI and Apache ECharts.
 
 ---
 
@@ -151,13 +151,62 @@ Automated data quality assertion suite, records per architectural layer, and gap
 
 | Source | Description | Coverage Span | License / Terms |
 |---|---|---|---|
-| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand) | {{DAILY_SPAN_START}} to {{DAILY_SPAN_END}} ({{TOTAL_DAILY_REPORTS}} reports: {{PSP_YEAR_BREAKDOWN}})* | Public Indian government data |
-| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated PMU / SCADA telemetry for demand, solar, and wind generation | {{HOURLY_SPAN_START}} to {{HOURLY_SPAN_END}} ({{TOTAL_STORED_HOURS}} hours across {{TOTAL_HOURLY_DAYS}} days: {{YEAR_BREAKDOWN}}) | CC BY 4.0 (Attribution 4.0 International) |
-| [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
+| [Grid Controller of India (Grid-India / POSOCO)](https://grid-india.in/en/reports/daily-psp-report) | Daily PSP Reports (generation by source, peak demand met, state demand; updated daily via CI) | {{DAILY_SPAN_START}} to {{DAILY_SPAN_END}} ({{TOTAL_DAILY_REPORTS}} reports: {{PSP_YEAR_BREAKDOWN}})* | Public Indian government data |
+| [Mendeley Data Repository (DOI: 10.17632/y58jknpgs8.2)](https://doi.org/10.17632/y58jknpgs8.2) | Hourly aggregated PMU / SCADA telemetry for demand, solar, and wind generation (static historical research archive) | {{HOURLY_SPAN_START}} to {{HOURLY_SPAN_END}} ({{TOTAL_STORED_HOURS}} hours across {{TOTAL_HOURLY_DAYS}} days: {{YEAR_BREAKDOWN}}) | CC BY 4.0 (Attribution 4.0 International) |
+| [Open-Meteo Historical Archive & Forecast API](https://open-meteo.com/) | Hourly ECMWF ERA5 reanalysis temperature, humidity, wind across 6 cities (incremental daily updates through yesterday) | 2021-09-01 to Present (yesterday) | Free for non-commercial open data science |
 
 > *\*Note on Daily PSP Coverage (API Listed vs Parsed):* {{PSP_COVERAGE_EXPLANATION}}
 > *Note on Weather Data:* Open-Meteo provides atmospheric data via ECMWF ERA5 numerical model reanalysis simulations, rather than physical surface weather station observations.
 > *Note on Historical Telemetry:* The Mendeley historical archive repository contains 2 documented multi-month gaps between high-resolution logging campaigns (2022-10 to 2023-03 and 2023-05 to 2023-12). These are documented in [`docs/source_notes.md`](docs/source_notes.md) and tracked in [`RESULTS.md`](RESULTS.md).
+
+---
+
+## 🔄 Automated Daily Rebuild & Release Storage Architecture
+
+The GitHub Actions workflow [`.github/workflows/refresh.yml`](.github/workflows/refresh.yml) runs daily (at 06:30 UTC / 12:00 IST) and on manual dispatch (`workflow_dispatch`). Rather than rebuilding the multi-year database from scratch on every run, the runner restores rolling state from a GitHub Release asset tagged `data-latest`:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        GITHUB ACTIONS RUNNER                           │
+│                                                                        │
+│  1. Restore Database                                                   │
+│     gh release download data-latest --pattern energy.db.gz             │
+│     gunzip data/energy.db.gz (fails if missing or < 1 MB)              │
+│                                                                        │
+│  2. Diagnostics & Ingestion                                            │
+│     • Connectivity check to Grid-India catalog API                     │
+│     • Incremental fetch: Grid-India daily PSP reports                  │
+│     • Incremental fetch: Open-Meteo ERA5 weather (latest - 7d to yday) │
+│     • Static archive: Mendeley SCADA skipped if raw rows exist         │
+│                                                                        │
+│  3. Processing & Analytical Marts                                      │
+│     • Staging clean + dropout/flatline filters (src/clean/run_all)     │
+│     • Mart generation + OLS cooling sensitivity (src/model/run_all)    │
+│     • PowerBI slim database export (data/energy_marts.db)              │
+│                                                                        │
+│  4. Validation & Quality Gates                                         │
+│     • Full test suite (REQUIRE_FULL_DB=1 pytest tests/ -v)             │
+│     • Sanity guard: row count monotonic growth, non-empty marts,       │
+│       freshness checks for weather (≤ 3d) & PSP (≤ 7d)                 │
+│                                                                        │
+│  5. Release Sync & Commit                                              │
+│     • Gzip data/energy.db -> data/energy.db.gz                         │
+│     • gh release upload data-latest data/energy.db.gz --clobber        │
+│     • Commit slim marts, updated figures & results (git pull --rebase) │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+### Seeding / Bootstrapping the Rolling Release
+To seed or re-seed the rolling database asset initially:
+
+```bash
+# 1. Compress the local full database
+gzip -c data/energy.db > data/energy.db.gz
+
+# 2. Upload to GitHub Release tagged 'data-latest'
+gh release create data-latest data/energy.db.gz --title "Latest Energy Database" --notes "Rolling database asset for daily GitHub Actions pipeline" || \
+gh release upload data-latest data/energy.db.gz --clobber
+```
 
 ---
 
