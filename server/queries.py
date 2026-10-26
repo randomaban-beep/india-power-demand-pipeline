@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+from contextlib import closing
 import csv
 import io
 import math
 import sqlite3
 from typing import Any
 
-import numpy as np
 import pandas as pd
 
 from src.model.temperature_sensitivity import compute_temperature_sensitivity
@@ -15,20 +15,17 @@ from src.utils.config import get_db_path
 VALID_SEASONS = {"Winter", "Summer", "Monsoon", "Post-Monsoon"}
 VALID_FEATURES = {"avg_temperature_c", "delhi_temp_c", "mumbai_temp_c"}
 SEASON_MONTHS = {
-    "Winter": [1, 2],
+    "Winter": [12, 1, 2],
     "Summer": [3, 4, 5],
     "Monsoon": [6, 7, 8, 9],
-    "Post-Monsoon": [10, 11, 12],
+    "Post-Monsoon": [10, 11],
 }
 
 
 def get_connection() -> sqlite3.Connection:
     """Establish a read-only SQLite database connection using row mapping."""
     db_file = get_db_path()
-    try:
-        conn = sqlite3.connect(f"file:{db_file.as_posix()}?mode=ro", uri=True)
-    except Exception:
-        conn = sqlite3.connect(str(db_file))
+    conn = sqlite3.connect(db_file.resolve().as_uri() + "?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -72,7 +69,7 @@ def build_filter_clause(
 
 def get_summary_metrics() -> dict[str, Any]:
     """Retrieve top-level KPI metrics across operational reports and high-resolution telemetry."""
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         latest_psp = conn.execute("""
             SELECT max_demand_met_mw, report_date, res_share_pct
             FROM stg_daily_psp
@@ -108,18 +105,26 @@ def get_summary_metrics() -> dict[str, Any]:
         last_run = conn.execute("""
             SELECT run_at, stage, source, status, message
             FROM pipeline_runs
-            WHERE status = 'ok'
+
             ORDER BY id DESC
             LIMIT 1;
         """).fetchone()
 
         return {
-            "latest_psp_peak_mw": float(latest_psp["max_demand_met_mw"]) if latest_psp and latest_psp["max_demand_met_mw"] is not None else None,
+            "latest_psp_peak_mw": float(latest_psp["max_demand_met_mw"])
+            if latest_psp and latest_psp["max_demand_met_mw"] is not None
+            else None,
             "latest_psp_date": latest_psp["report_date"] if latest_psp else None,
-            "latest_re_share_pct": float(round(latest_psp["res_share_pct"], 2)) if latest_psp and latest_psp["res_share_pct"] is not None else None,
-            "record_peak_mw": float(record_psp["max_demand_met_mw"]) if record_psp and record_psp["max_demand_met_mw"] is not None else None,
+            "latest_re_share_pct": float(round(latest_psp["res_share_pct"], 2))
+            if latest_psp and latest_psp["res_share_pct"] is not None
+            else None,
+            "record_peak_mw": float(record_psp["max_demand_met_mw"])
+            if record_psp and record_psp["max_demand_met_mw"] is not None
+            else None,
             "record_peak_date": record_psp["report_date"] if record_psp else None,
-            "avg_re_share_pct": float(round(avg_re_row["avg_re_share"], 2)) if avg_re_row and avg_re_row["avg_re_share"] is not None else None,
+            "avg_re_share_pct": float(round(avg_re_row["avg_re_share"], 2))
+            if avg_re_row and avg_re_row["avg_re_share"] is not None
+            else None,
             "hourly_window_start": telemetry_bounds["window_start"] if telemetry_bounds else None,
             "hourly_window_end": telemetry_bounds["window_end"] if telemetry_bounds else None,
             "total_hourly_records": int(telemetry_bounds["record_count"]) if telemetry_bounds else 0,
@@ -137,7 +142,7 @@ def get_daily_demand(
     where_str, params = build_filter_clause("date_ist", "season", from_date, to_date, seasons)
     query = f"""
         WITH unified_days AS (
-            SELECT 
+            SELECT
                 date_ist,
                 season,
                 weekday_name,
@@ -145,10 +150,10 @@ def get_daily_demand(
                 peak_daily_demand_mw
             FROM mart_anomaly_days
             UNION ALL
-            SELECT 
+            SELECT
                 report_date AS date_ist,
-                CASE 
-                    WHEN CAST(strftime('%m', report_date) AS INT) IN (1, 2) THEN 'Winter'
+                CASE
+                    WHEN CAST(strftime('%m', report_date) AS INT) IN (12, 1, 2) THEN 'Winter'
                     WHEN CAST(strftime('%m', report_date) AS INT) IN (3, 4, 5) THEN 'Summer'
                     WHEN CAST(strftime('%m', report_date) AS INT) IN (6, 7, 8, 9) THEN 'Monsoon'
                     ELSE 'Post-Monsoon'
@@ -169,19 +174,19 @@ def get_daily_demand(
               AND max_demand_met_mw IS NOT NULL
         ),
         windowed AS (
-            SELECT 
+            SELECT
                 date_ist,
                 season,
                 weekday_name,
                 avg_daily_demand_mw,
                 peak_daily_demand_mw,
                 AVG(avg_daily_demand_mw) OVER (
-                    ORDER BY date_ist
-                    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+                    ORDER BY julianday(date_ist)
+                    RANGE BETWEEN 6 PRECEDING AND CURRENT ROW
                 ) AS rolling_7d_avg_mw
             FROM unified_days
         )
-        SELECT 
+        SELECT
             date_ist AS date,
             season,
             weekday_name,
@@ -192,7 +197,7 @@ def get_daily_demand(
         {where_str}
         ORDER BY date_ist ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -218,13 +223,13 @@ def get_monthly_peaks(
             allowed_months.extend(SEASON_MONTHS.get(s, []))
         if allowed_months:
             placeholders = ", ".join(["?"] * len(allowed_months))
-            clauses.append(f"month_num IN ({placeholders})")
+            clauses.append(f"CAST(month_num AS INTEGER) IN ({placeholders})")
             params.extend(allowed_months)
 
     where_str = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     query = f"""
         WITH all_monthly AS (
-            SELECT 
+            SELECT
                 year,
                 month_num,
                 year_month,
@@ -232,7 +237,7 @@ def get_monthly_peaks(
                 avg_demand_mw
             FROM mart_monthly_peak_demand
             UNION ALL
-            SELECT 
+            SELECT
                 CAST(strftime('%Y', report_date) AS INT) AS year,
                 CAST(strftime('%m', report_date) AS INT) AS month_num,
                 substr(report_date, 1, 7) AS year_month,
@@ -244,7 +249,7 @@ def get_monthly_peaks(
             GROUP BY year, month_num, year_month
         ),
         ranked AS (
-            SELECT 
+            SELECT
                 m.year,
                 m.month_num,
                 m.year_month,
@@ -252,17 +257,17 @@ def get_monthly_peaks(
                 ROUND(m.avg_demand_mw, 1) AS avg_demand_mw,
                 DENSE_RANK() OVER (PARTITION BY m.year ORDER BY m.peak_demand_mw DESC) AS peak_rank_in_year,
                 ROUND(prev.peak_demand_mw, 1) AS prev_year_peak_mw,
-                CASE 
+                CASE
                     WHEN prev.peak_demand_mw IS NOT NULL AND prev.peak_demand_mw > 0
                     THEN ROUND(((m.peak_demand_mw - prev.peak_demand_mw) / prev.peak_demand_mw) * 100.0, 2)
-                    ELSE NULL 
+                    ELSE NULL
                 END AS yoy_peak_growth_pct
             FROM all_monthly m
-            LEFT JOIN all_monthly prev 
-                ON prev.year = m.year - 1 
-               AND prev.month_num = m.month_num
+            LEFT JOIN all_monthly prev
+                ON prev.year = m.year - 1
+               AND CAST(prev.month_num AS INTEGER) = CAST(m.month_num AS INTEGER)
         )
-        SELECT 
+        SELECT
             year,
             month_num,
             year_month,
@@ -275,7 +280,7 @@ def get_monthly_peaks(
         {where_str}
         ORDER BY year_month ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -299,7 +304,7 @@ def get_temp_vs_demand(
 
     count_query = f"SELECT COUNT(*) FROM mart_temp_vs_demand {where_str};"
     points_query = f"""
-        SELECT 
+        SELECT
             timestamp_ist,
             date_ist,
             hour_ist,
@@ -311,7 +316,7 @@ def get_temp_vs_demand(
         ORDER BY timestamp_ist ASC;
     """
 
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         total_matching = conn.execute(count_query, params).fetchone()[0]
         if total_matching == 0:
             return {
@@ -334,11 +339,13 @@ def get_temp_vs_demand(
         bins_grouped = df.groupby(df["temp_c"].round().astype(int))
         median_bins: list[dict[str, Any]] = []
         for temp_val, grp in bins_grouped:
-            median_bins.append({
-                "temp_bin_c": int(temp_val),
-                "median_demand_mw": float(round(grp["demand_mw"].median(), 1)),
-                "count": int(len(grp)),
-            })
+            median_bins.append(
+                {
+                    "temp_bin_c": int(temp_val),
+                    "median_demand_mw": float(round(grp["demand_mw"].median(), 1)),
+                    "count": int(len(grp)),
+                }
+            )
         median_bins.sort(key=lambda x: x["temp_bin_c"])
 
         return {
@@ -363,7 +370,7 @@ def get_demand_heatmap(
         where_str = "WHERE demand_mw IS NOT NULL"
 
     query = f"""
-        SELECT 
+        SELECT
             CAST(strftime('%m', timestamp_ist) AS INT) AS month,
             hour_ist AS hour,
             ROUND(AVG(demand_mw), 1) AS avg_demand_mw,
@@ -373,14 +380,14 @@ def get_demand_heatmap(
         GROUP BY month, hour
         ORDER BY month ASC, hour ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
 
 def get_sensitivity_analysis() -> dict[str, Any]:
     """Retrieve full-sample hinge cooling regression estimates and candidate threshold sensitivities."""
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         return compute_temperature_sensitivity(conn)
 
 
@@ -403,7 +410,7 @@ def get_duck_curve_profile(
         where_str = "WHERE demand_mw IS NOT NULL"
 
     query = f"""
-        SELECT 
+        SELECT
             hour_ist AS hour,
             ROUND(AVG(demand_mw), 1) AS demand_mw,
             ROUND(AVG(solar_mw), 1) AS solar_mw,
@@ -415,7 +422,7 @@ def get_duck_curve_profile(
         GROUP BY hour_ist
         ORDER BY hour_ist ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         profile = [dict(r) for r in rows]
 
@@ -434,9 +441,25 @@ def get_duck_curve_profile(
 
         solar_peak_entry = max(profile, key=lambda x: x["solar_mw"] if x["solar_mw"] is not None else 0.0)
         daylight_hours = [x for x in profile if 9 <= x["hour"] <= 16 and x["net_load_mw"] is not None]
-        net_load_trough_entry = min(daylight_hours, key=lambda x: x["net_load_mw"]) if daylight_hours else min(profile, key=lambda x: x["net_load_mw"])
+        net_load_trough_entry = (
+            min(daylight_hours, key=lambda x: x["net_load_mw"])
+            if daylight_hours
+            else min(
+                (x for x in profile if x["net_load_mw"] is not None),
+                key=lambda x: x["net_load_mw"],
+                default={"hour": None, "net_load_mw": None},
+            )
+        )
         evening_hours = [x for x in profile if 18 <= x["hour"] <= 23 and x["net_load_mw"] is not None]
-        evening_peak_entry = max(evening_hours, key=lambda x: x["net_load_mw"]) if evening_hours else max(profile, key=lambda x: x["net_load_mw"])
+        evening_peak_entry = (
+            max(evening_hours, key=lambda x: x["net_load_mw"])
+            if evening_hours
+            else max(
+                (x for x in profile if x["net_load_mw"] is not None),
+                key=lambda x: x["net_load_mw"],
+                default={"hour": None, "net_load_mw": None},
+            )
+        )
 
         ramp_mw = None
         if evening_peak_entry["net_load_mw"] is not None and net_load_trough_entry["net_load_mw"] is not None:
@@ -473,10 +496,16 @@ def get_monthly_re_share(
     else:
         where_psp = "WHERE res_share_pct IS NOT NULL"
 
+    if seasons:
+        months = [m for season in seasons for m in SEASON_MONTHS[season]]
+        where_psp += (
+            " AND CAST(strftime('%m', report_date) AS INTEGER) IN (" + ",".join("?" for _ in months) + ")"
+        )
+        params_psp.extend(months)
     params = params_net + params_psp
     query = f"""
         WITH net_monthly AS (
-            SELECT 
+            SELECT
                 strftime('%Y-%m', timestamp_ist) AS year_month,
                 ROUND(AVG(re_penetration_pct), 2) AS avg_re_share_pct,
                 ROUND(AVG(solar_mw), 1) AS avg_solar_mw,
@@ -487,9 +516,9 @@ def get_monthly_re_share(
             GROUP BY year_month
         ),
         psp_monthly AS (
-            SELECT 
+            SELECT
                 substr(report_date, 1, 7) AS year_month,
-                ROUND(AVG(res_share_pct), 2) AS avg_re_share_pct,
+                ROUND(AVG((solar_gen_mu + wind_gen_mu) * 100.0 / NULLIF(energy_met_mu, 0)), 2) AS avg_re_share_pct,
                 ROUND(AVG(solar_gen_mu * 1000.0 / 24.0), 1) AS avg_solar_mw,
                 ROUND(AVG(wind_gen_mu * 1000.0 / 24.0), 1) AS avg_wind_mw,
                 ROUND(AVG(energy_met_mu * 1000.0 / 24.0), 1) AS avg_demand_mw
@@ -503,7 +532,7 @@ def get_monthly_re_share(
             UNION ALL
             SELECT * FROM psp_monthly
         )
-        SELECT 
+        SELECT
             year_month,
             avg_re_share_pct,
             avg_solar_mw,
@@ -512,7 +541,7 @@ def get_monthly_re_share(
         FROM combined
         ORDER BY year_month ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
@@ -525,7 +554,7 @@ def get_demand_anomalies(
     """Retrieve normalized demand deviation scores alongside classified real and data-quality anomalies."""
     where_str, params = build_filter_clause("date_ist", "season", from_date, to_date, seasons)
     query = f"""
-        SELECT 
+        SELECT
             date_ist AS date,
             season,
             weekday_name,
@@ -542,7 +571,7 @@ def get_demand_anomalies(
         {where_str}
         ORDER BY date_ist ASC;
     """
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         data = [dict(r) for r in rows]
         total_anomalies = sum(1 for d in data if d.get("is_anomaly") == 1)
@@ -581,7 +610,7 @@ def get_top_net_load_ramps(
 
     where_str = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     query = f"""
-        SELECT 
+        SELECT
             r.timestamp_ist,
             r.date_ist,
             r.hour_ist,
@@ -602,14 +631,14 @@ def get_top_net_load_ramps(
     """
     params.append(limit)
 
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
 
 def get_pipeline_health() -> dict[str, Any]:
     """Retrieve automated test status records, execution audit history, and database layer volume."""
-    with get_connection() as conn:
+    with closing(get_connection()) as conn:
         checks_rows = conn.execute("""
             SELECT id, checked_at, check_name, table_name, status, details
             FROM data_quality_checks
@@ -659,7 +688,9 @@ def export_table_csv(
     }
 
     if name not in valid_exports:
-        raise ValueError(f"Invalid export name '{name}'. Valid exports are: {', '.join(sorted(valid_exports))}")
+        raise ValueError(
+            f"Invalid export name '{name}'. Valid exports are: {', '.join(sorted(valid_exports))}"
+        )
 
     table_name, date_col, season_col = valid_exports[name]
 

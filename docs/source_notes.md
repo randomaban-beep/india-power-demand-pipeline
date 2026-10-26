@@ -50,7 +50,7 @@
   - **Temporal Continuity & Documented Repository Limitations:**
     - Gap 1: `2022-09-30 23:00` to `2023-04-01 00:00` (4,369 hours, spanning winter 2022-23 and post-monsoon).
     - Gap 2: `2023-04-30 23:00` to `2024-01-01 00:00` (5,881 hours, spanning monsoon and post-monsoon 2023).
-    - Both gaps are inherent to the published Mendeley dataset repository file availability, audited by `src/clean/quality_checks.py`, and recorded transparently in `RESULTS.md` and Chart 9.
+    - Both gaps are present in this project’s selected extract; the loader excludes most files over 20 MB, so these are not evidence that the source repository lacks the corresponding data, audited by `src/clean/quality_checks.py`, and recorded transparently in `RESULTS.md` and Chart 9.
 - **Cadence:** Historical backfill (ends mid-2025). Live daily refreshes are fulfilled continuously via Grid-India Daily PSP reports.
 
 ---
@@ -75,8 +75,7 @@
 
 ---
 
-## 4. data.gov.in / CEA Monthly Data (Optional State-Level Context)
+## 4. Scope and verification
 
-- **Source:** Central Electricity Authority (CEA) monthly state-wise power supply position.
-- **Access:** Requires free API key (`DATA_GOV_IN_API_KEY`).
-- **Pipeline Role:** Optional enrichment table; pipeline functions seamlessly even without CEA key.
+The CEA/data.gov.in enrichment is not implemented. No API key is required.
+The archive API uses its default model selection (not explicitly pinned to ERA5); recent records can come from the forecast API. Model provenance is not stored per row. The city aggregate is unweighted. Source-portal counts above are historical notes, not a current completeness guarantee.

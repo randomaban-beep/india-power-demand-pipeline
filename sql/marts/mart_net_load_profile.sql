@@ -14,9 +14,9 @@ WITH hourly_metrics AS (
         wind_mw,
         (solar_mw + wind_mw) AS re_total_mw,
         net_load_mw,
-        CASE 
+        CASE
             WHEN demand_mw > 0 THEN ROUND(((solar_mw + wind_mw) / demand_mw) * 100.0, 2)
-            ELSE 0.0 
+            ELSE NULL
         END AS re_penetration_pct,
         CASE
             WHEN strftime('%m', timestamp_ist) IN ('12', '01', '02') THEN 'Winter'

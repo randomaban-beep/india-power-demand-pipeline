@@ -14,19 +14,22 @@ from typing import Generator
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import NullPool
 
-from src.utils.config import DB_PATH
+from src.utils.config import get_db_path
 
 
-def get_engine(db_path: Path = DB_PATH) -> Engine:
+def get_engine(db_path: Path | None = None) -> Engine:
     """Return a SQLAlchemy engine for the SQLite database."""
+    db_path = db_path or get_db_path(writable=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(f"sqlite:///{db_path}", echo=False)
+    return create_engine(f"sqlite:///{db_path}", echo=False, poolclass=NullPool)
 
 
 @contextmanager
-def get_connection(db_path: Path = DB_PATH) -> Generator[sqlite3.Connection, None, None]:
+def get_connection(db_path: Path | None = None) -> Generator[sqlite3.Connection, None, None]:
     """Yield a raw sqlite3 connection (useful for executescript / PRAGMA)."""
+    db_path = db_path or get_db_path(writable=True)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
@@ -39,14 +42,17 @@ def get_connection(db_path: Path = DB_PATH) -> Generator[sqlite3.Connection, Non
 
 def get_trigger() -> str:
     """Return 'github_actions' if running in CI/GitHub Actions, else 'local'."""
-    return os.getenv("PIPELINE_TRIGGER", "github_actions" if os.getenv("GITHUB_ACTIONS") == "true" else "local")
+    return os.getenv(
+        "PIPELINE_TRIGGER", "github_actions" if os.getenv("GITHUB_ACTIONS") == "true" else "local"
+    )
 
 
-def init_db(db_path: Path = DB_PATH) -> None:
+def init_db(db_path: Path | None = None) -> None:
     """Create the pipeline_runs audit table if it does not exist."""
     engine = get_engine(db_path)
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS pipeline_runs (
                 id            INTEGER PRIMARY KEY AUTOINCREMENT,
                 run_at        TEXT    NOT NULL,           -- ISO-8601 UTC
@@ -60,7 +66,8 @@ def init_db(db_path: Path = DB_PATH) -> None:
                 trigger       TEXT    NOT NULL DEFAULT 'local', -- local|github_actions
                 message       TEXT
             )
-        """))
+        """)
+        )
         # Check if trigger column exists in existing table
         cols = [r[1] for r in conn.execute(text("PRAGMA table_info(pipeline_runs)")).fetchall()]
         if "trigger" not in cols:

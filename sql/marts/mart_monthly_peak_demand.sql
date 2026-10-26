@@ -24,7 +24,8 @@ ranked_peaks AS (
         -- Window function: Rank highest peak per year
         RANK() OVER (PARTITION BY year ORDER BY peak_demand_mw DESC) AS peak_rank_in_year,
         -- Window function: Lag 1 year (same month previous year)
-        LAG(peak_demand_mw, 1) OVER (PARTITION BY month_num ORDER BY year) AS prev_year_peak_mw
+        CASE WHEN CAST(year AS INTEGER) - CAST(LAG(year) OVER (PARTITION BY month_num ORDER BY year) AS INTEGER) = 1
+             THEN LAG(peak_demand_mw) OVER (PARTITION BY month_num ORDER BY year) END AS prev_year_peak_mw
     FROM monthly_peaks
 )
 SELECT

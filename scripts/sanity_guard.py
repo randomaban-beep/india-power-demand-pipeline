@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
-from pathlib import Path
 from sqlalchemy import text
 
 from src.utils.config import DATA_DIR, get_db_path
@@ -47,8 +46,12 @@ def check_sanity() -> bool:
         current_psp_count = conn.execute(text("SELECT COUNT(*) FROM stg_daily_psp")).scalar() or 0
         psp_status = "PASS" if current_psp_count >= min_psp_count else "FAIL"
         if psp_status == "FAIL":
-            failures.append(f"stg_daily_psp count {current_psp_count} is lower than pre-ingest count {min_psp_count}")
-        print(f"{'stg_daily_psp row count':<38} | {f'>= {min_psp_count}':<18} | {str(current_psp_count):<20} | {psp_status}")
+            failures.append(
+                f"stg_daily_psp count {current_psp_count} is lower than pre-ingest count {min_psp_count}"
+            )
+        print(
+            f"{'stg_daily_psp row count':<38} | {f'>= {min_psp_count}':<18} | {str(current_psp_count):<20} | {psp_status}"
+        )
 
         for mart in MART_TABLES:
             try:
@@ -65,7 +68,9 @@ def check_sanity() -> bool:
         mwd_status = "PASS" if mwd_count >= 500 else "FAIL"
         if mwd_status == "FAIL":
             failures.append(f"mart_daily_weather_demand count {mwd_count} is under 500 rows")
-        print(f"{'mart_daily_weather_demand rows':<38} | {'>= 500':<18} | {str(mwd_count):<20} | {mwd_status}")
+        print(
+            f"{'mart_daily_weather_demand rows':<38} | {'>= 500':<18} | {str(mwd_count):<20} | {mwd_status}"
+        )
 
         weather_res = conn.execute(text("SELECT MAX(timestamp_ist) FROM raw_weather")).scalar()
         if not weather_res:
@@ -77,7 +82,9 @@ def check_sanity() -> bool:
             weather_status = "PASS" if weather_age_days <= 3 else "FAIL"
             if weather_status == "FAIL":
                 failures.append(f"Newest weather ({weather_res}) is {weather_age_days} days old (> 3 days)")
-            print(f"{'Newest weather timestamp age':<38} | {'<= 3 days old':<18} | {f'{weather_age_days}d ({weather_res[:10]})':<20} | {weather_status}")
+            print(
+                f"{'Newest weather timestamp age':<38} | {'<= 3 days old':<18} | {f'{weather_age_days}d ({weather_res[:10]})':<20} | {weather_status}"
+            )
         else:
             failures.append("No weather records found in raw_weather or stg_hourly_weather")
             print(f"{'Newest weather timestamp age':<38} | {'<= 3 days old':<18} | {'None':<20} | FAIL")
@@ -89,7 +96,9 @@ def check_sanity() -> bool:
             psp_age_status = "PASS" if psp_age_days <= 7 else "FAIL"
             if psp_age_status == "FAIL":
                 failures.append(f"Newest Grid-India report ({psp_res}) is {psp_age_days} days old (> 7 days)")
-            print(f"{'Newest Grid-India report age':<38} | {'<= 7 days old':<18} | {f'{psp_age_days}d ({psp_res[:10]})':<20} | {psp_age_status}")
+            print(
+                f"{'Newest Grid-India report age':<38} | {'<= 7 days old':<18} | {f'{psp_age_days}d ({psp_res[:10]})':<20} | {psp_age_status}"
+            )
         else:
             failures.append("No Grid-India records found in stg_daily_psp")
             print(f"{'Newest Grid-India report age':<38} | {'<= 7 days old':<18} | {'None':<20} | FAIL")

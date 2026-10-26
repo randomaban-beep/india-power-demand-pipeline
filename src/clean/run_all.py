@@ -15,12 +15,21 @@ from src.utils.logging import get_logger
 log = get_logger(__name__)
 
 
-def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, duration_s: float, status: str, message: str) -> None:
+def log_run(
+    stage: str,
+    source: str,
+    rows_fetched: int,
+    rows_inserted: int,
+    duration_s: float,
+    status: str,
+    message: str,
+) -> None:
     engine = get_engine()
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
     trigger = get_trigger()
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             INSERT INTO pipeline_runs (
                 run_at, stage, source, rows_fetched, rows_inserted,
                 rows_skipped, duration_s, status, trigger, message
@@ -28,17 +37,19 @@ def log_run(stage: str, source: str, rows_fetched: int, rows_inserted: int, dura
                 :run_at, :stage, :source, :rows_fetched, :rows_inserted,
                 0, :duration_s, :status, :trigger, :message
             )
-        """), {
-            "run_at": now_iso,
-            "stage": stage,
-            "source": source,
-            "rows_fetched": rows_fetched,
-            "rows_inserted": rows_inserted,
-            "duration_s": duration_s,
-            "status": status,
-            "trigger": trigger,
-            "message": message
-        })
+        """),
+            {
+                "run_at": now_iso,
+                "stage": stage,
+                "source": source,
+                "rows_fetched": rows_fetched,
+                "rows_inserted": rows_inserted,
+                "duration_s": duration_s,
+                "status": status,
+                "trigger": trigger,
+                "message": message,
+            },
+        )
         conn.commit()
 
 
@@ -52,6 +63,8 @@ def run_staging_sql() -> None:
     with get_connection() as conn:
         for fname in staging_files:
             fpath = SQL_DIR / "staging" / fname
+            if not fpath.exists():
+                raise FileNotFoundError(f"Required SQL model missing: {fpath}")
             if fpath.exists():
                 sql_content = fpath.read_text(encoding="utf-8")
                 conn.executescript(sql_content)
@@ -66,8 +79,20 @@ def run_all() -> None:
     try:
         run_staging_sql()
         dq_summary = run_checks()
+        if dq_summary["failed"]:
+            raise RuntimeError(
+                f"Data quality gate failed: {dq_summary['failed']} checks; inspect data_quality_checks"
+            )
         dur = round(time.time() - t0, 2)
-        log_run("clean", "staging_layer", dq_summary["total_checks"], dq_summary["passed"], dur, "ok", f"{dq_summary['passed']} checks passed, {dq_summary['failed']} failed")
+        log_run(
+            "clean",
+            "staging_layer",
+            dq_summary["total_checks"],
+            dq_summary["passed"],
+            dur,
+            "ok",
+            f"{dq_summary['passed']} checks passed, {dq_summary['failed']} failed",
+        )
         log.info("Cleaning and quality checks complete in %s seconds.", dur)
     except Exception as e:
         dur = round(time.time() - t0, 2)

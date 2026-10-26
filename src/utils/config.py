@@ -22,13 +22,15 @@ DOCS_DIR: Path = ROOT_DIR / "docs"
 FIGURES_DIR: Path = DOCS_DIR / "figures"
 SQL_DIR: Path = ROOT_DIR / "sql"
 
-def get_db_path() -> Path:
+
+def get_db_path(*, writable: bool = False) -> Path:
     """Return DB path, falling back to committed slim energy_marts.db when energy.db is absent."""
     env_path = os.getenv("ENERGY_DB_PATH")
     if env_path:
-        return Path(env_path)
+        path = Path(env_path).expanduser()
+        return path if path.is_absolute() else ROOT_DIR / path
     primary = DATA_DIR / "energy.db"
-    if primary.exists():
+    if writable or primary.exists():
         return primary
     slim = DATA_DIR / "energy_marts.db"
     if slim.exists():
@@ -36,17 +38,17 @@ def get_db_path() -> Path:
     return primary
 
 
-DB_PATH: Path = get_db_path()
+DB_PATH: Path = get_db_path(writable=True)
 
 # ---------------------------------------------------------------------------
 # Open-Meteo cities
 # ---------------------------------------------------------------------------
 
 CITIES: dict[str, dict[str, float]] = {
-    "Delhi":     {"lat": 28.6139, "lon": 77.2090},
-    "Mumbai":    {"lat": 19.0760, "lon": 72.8777},
-    "Chennai":   {"lat": 13.0827, "lon": 80.2707},
-    "Kolkata":   {"lat": 22.5726, "lon": 88.3639},
+    "Delhi": {"lat": 28.6139, "lon": 77.2090},
+    "Mumbai": {"lat": 19.0760, "lon": 72.8777},
+    "Chennai": {"lat": 13.0827, "lon": 80.2707},
+    "Kolkata": {"lat": 22.5726, "lon": 88.3639},
     "Bengaluru": {"lat": 12.9716, "lon": 77.5946},
     "Ahmedabad": {"lat": 23.0225, "lon": 72.5714},
 }

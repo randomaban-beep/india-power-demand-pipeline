@@ -32,7 +32,7 @@ SELECT
     timestamp_ist,
     date_ist,
     hour_ist,
-    -- National demand-weighted or multi-city average temperature
+    -- Unweighted multi-city average temperature
     ROUND(AVG(temperature_c), 2) AS avg_temperature_c,
     ROUND(MAX(temperature_c), 2) AS max_temperature_c,
     ROUND(MIN(temperature_c), 2) AS min_temperature_c,

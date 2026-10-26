@@ -1141,3 +1141,9 @@ body {
     font-size: 13px;
   }
 }
+
+/* Keep grid children and wide audit tables within narrow viewports. */
+.card, .method-card, .section, .card-grid-2 > * { min-width: 0; }
+.table-wrap { max-width: 100%; overflow-x: auto; }
+#request-status { padding: 8px 16px; font-size: 13px; background: var(--bg-subtle); overflow-wrap: anywhere; }
+@media (max-width: 768px) { .stat-pills { flex-wrap: wrap; } .method-card { overflow-wrap: anywhere; } }

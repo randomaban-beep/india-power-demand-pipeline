@@ -117,7 +117,7 @@ jobs:
       - name: Generate figures
         run: python -m src.viz.generate_all
 
-      - name: Write RESULTS.md and render README.md
+      - name: Write computed RESULTS.md
         run: python -m src.model.write_results
 
       - name: Sanity guard
@@ -138,9 +138,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add data/energy_marts.db data/processed/*.parquet data/processed/*.csv docs/figures/ docs/cleaning_log.md RESULTS.md README.md || true
           if ! git diff --cached --quiet; then
-            export GIT_AUTHOR_DATE="2026-08-18T14:30:00+05:30"
-            export GIT_COMMITTER_DATE="2026-08-18T14:30:00+05:30"
-            git commit -m "India Power Demand & Weather Pipeline: end-to-end analytics platform"
+            git commit -m "data: refresh validated analytics snapshot"
             git pull --rebase
             git push
           else

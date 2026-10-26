@@ -1,0 +1,33 @@
+{
+  "started_at": "2026-10-26T10:10:04.007535+00:00",
+  "python": "3.11.9",
+  "platform": "Windows-10-10.0.26200-SP0",
+  "mode": "offline",
+  "stages": {
+    "clean": 0.242782,
+    "model": 0.072797
+  },
+  "status": "ok",
+  "tables": {
+    "raw_daily_psp": 2,
+    "raw_hourly_demand": 168,
+    "raw_state_psp": 74,
+    "raw_weather": 1008,
+    "pipeline_runs": 2,
+    "stg_hourly_demand": 168,
+    "stg_hourly_weather": 168,
+    "stg_daily_psp": 2,
+    "data_quality_checks": 9,
+    "mart_demand_profile_by_season": 24,
+    "mart_monthly_peak_demand": 1,
+    "mart_temp_vs_demand": 168,
+    "mart_daily_weather_demand": 2,
+    "mart_net_load_profile": 168,
+    "mart_net_load_ramps": 167,
+    "mart_anomaly_days": 7
+  },
+  "valid_demand_rows": 168,
+  "raw_hourly_sha256": "ee44f57f33d2d5d5a3235e098d39e54548f10f3f1579a4f3a5a589114782561b",
+  "duration_s": 3.216373,
+  "hourly_records_per_second": 52.23
+}
