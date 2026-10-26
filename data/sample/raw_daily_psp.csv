@@ -1,0 +1,3 @@
+report_date,evening_peak_mw,evening_peak_shortage_mw,energy_met_mu,hydro_gen_mu,wind_gen_mu,solar_gen_mu,energy_shortage_mu,max_demand_met_mw,max_demand_time,coal_gen_mu,lignite_gen_mu,nuclear_gen_mu,gas_gen_mu,res_gen_mu,total_gen_mu,ingested_at
+2024-04-02,,,4722.38,270.67,129.459,373.529,1.17,209499.0,,3936.16,109.02,136.6,104.35,556.21,5113.01,2026-10-25T03:04:54.212518+00:00
+2024-04-07,,,4649.45,245.31,148.63,383.45,0.49,204312.0,,3872.79,106.66,142.22,92.2,587.25,5046.43,2026-10-25T03:04:54.212518+00:00

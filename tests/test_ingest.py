@@ -4,12 +4,13 @@ from pathlib import Path
 import pytest
 from src.utils.config import CITIES
 from src.ingest.grid_india import parse_mop_e_sheet
-from src.ingest.open_meteo import fetch_city_weather_recent
 
 
 def test_parse_mop_e_sheet_structure(tmp_path: Path) -> None:
     """Verify parse_mop_e_sheet extracts valid values from local sample if present."""
     sample_xls = Path("data/raw/sample_psp_20261023.xls")
+    if not sample_xls.exists():
+        pytest.skip("Optional locally downloaded Grid-India workbook is absent")
     if sample_xls.exists():
         all_india, states = parse_mop_e_sheet(sample_xls)
         assert "report_date" in all_india

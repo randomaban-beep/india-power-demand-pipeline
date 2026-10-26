@@ -17,7 +17,7 @@ import requests
 import xlrd
 from sqlalchemy import text
 
-from src.utils.config import DB_PATH, RAW_DIR
+from src.utils.config import RAW_DIR
 from src.utils.db import get_engine, init_db
 from src.utils.logging import get_logger
 
@@ -31,7 +31,8 @@ def create_raw_tables() -> None:
     """Create raw tables for Grid-India daily PSP data if not exists."""
     engine = get_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS raw_daily_psp (
                 report_date       TEXT PRIMARY KEY,
                 evening_peak_mw   REAL,
@@ -51,8 +52,10 @@ def create_raw_tables() -> None:
                 total_gen_mu      REAL,
                 ingested_at       TEXT NOT NULL
             );
-        """))
-        conn.execute(text("""
+        """)
+        )
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS raw_state_psp (
                 report_date       TEXT,
                 region            TEXT,
@@ -64,7 +67,8 @@ def create_raw_tables() -> None:
                 ingested_at       TEXT NOT NULL,
                 PRIMARY KEY (report_date, region, state)
             );
-        """))
+        """)
+        )
         conn.commit()
 
 
@@ -92,7 +96,7 @@ def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dic
     else:
         wb = xlrd.open_workbook(str(xls_input))
         fname = xls_input.stem
-    
+
     sheet_names = [s.lower() for s in wb.sheet_names()]
     if "mop_e" in sheet_names:
         idx = sheet_names.index("mop_e")
@@ -134,12 +138,15 @@ def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dic
     if not report_iso_date:
         # Fallback to file name date if available
         # e.g. 23.10.26_NLDC_PSP
-        fname = xls_path.stem
         parts = fname.split("_")[0].split(".")
         if len(parts) == 3:
             day, month, yr = int(parts[0]), int(parts[1]), int(parts[2])
             full_yr = 2000 + yr if yr < 100 else yr
             report_iso_date = f"{full_yr:04d}-{month:02d}-{day:02d}"
+
+    if not report_iso_date:
+        raise ValueError("PSP report has no parseable reporting date or filename date")
+    dt.date.fromisoformat(report_iso_date)
 
     def safe_float(val: Any) -> float | None:
         try:
@@ -159,7 +166,7 @@ def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dic
 
     for r in range(sheet.nrows):
         col0 = str(sheet.cell_value(r, 0)).strip()
-        
+
         # Section A items
         if "Demand Met (MW) during Evening Peak" in col0:
             all_india["evening_peak_mw"] = safe_float(sheet.cell_value(r, 7))
@@ -212,15 +219,17 @@ def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dic
                 short_mw = safe_float(sheet.cell_value(r, 3))
                 e_met = safe_float(sheet.cell_value(r, 4))
                 e_short = safe_float(sheet.cell_value(r, 8)) if sheet.ncols > 8 else 0.0
-                states.append({
-                    "report_date": report_iso_date,
-                    "region": current_region or "Unknown",
-                    "state": st_name,
-                    "max_demand_mw": max_d,
-                    "shortage_mw": short_mw,
-                    "energy_met_mu": e_met,
-                    "energy_shortage_mu": e_short,
-                })
+                states.append(
+                    {
+                        "report_date": report_iso_date,
+                        "region": current_region or "Unknown",
+                        "state": st_name,
+                        "max_demand_mw": max_d,
+                        "shortage_mw": short_mw,
+                        "energy_met_mu": e_met,
+                        "energy_shortage_mu": e_short,
+                    }
+                )
 
     return all_india, states
 
@@ -282,14 +291,20 @@ def parse_pdf_psp(pdf_content: bytes, filename: str = "") -> tuple[dict[str, Any
 
     all_india: dict[str, Any] = {
         "report_date": report_iso_date,
-        "evening_peak_mw": get_num(r"Demand Met during Evening Peak.*?\s+([0-9,]+)\s*$", "Demand Met during Evening Peak"),
-        "evening_peak_shortage_mw": get_num(r"Peak Shortage \(MW\).*?\s+([0-9,.]+)\s*$", "Peak Shortage (MW)"),
+        "evening_peak_mw": get_num(
+            r"Demand Met during Evening Peak.*?\s+([0-9,]+)\s*$", "Demand Met during Evening Peak"
+        ),
+        "evening_peak_shortage_mw": get_num(
+            r"Peak Shortage \(MW\).*?\s+([0-9,.]+)\s*$", "Peak Shortage (MW)"
+        ),
         "energy_met_mu": get_num(r"Energy Met \(MU\).*?\s+([0-9,.]+)\s*$", "Energy Met (MU)"),
         "hydro_gen_mu": get_num(r"Hydro Gen \(MU\).*?\s+([0-9,.]+)\s*$", "Hydro Gen (MU)"),
         "wind_gen_mu": get_num(r"Wind Gen \(MU\).*?\s+([0-9,.]+)\s*$", "Wind Gen (MU)"),
         "solar_gen_mu": get_num(r"Solar Gen \(MU\)\*?.*?\s+([0-9,.]+)\s*$", "Solar Gen (MU)"),
         "energy_shortage_mu": get_num(r"Energy Shortage \(MU\).*?\s+([0-9,.]+)\s*$", "Energy Shortage (MU)"),
-        "max_demand_met_mw": get_num(r"Maximum Demand Met During the Day.*?\s+([0-9,]+)\s*$", "Maximum Demand Met During the Day"),
+        "max_demand_met_mw": get_num(
+            r"Maximum Demand Met During the Day.*?\s+([0-9,]+)\s*$", "Maximum Demand Met During the Day"
+        ),
         "max_demand_time": None,
         "coal_gen_mu": None,
         "lignite_gen_mu": None,
@@ -334,7 +349,11 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
     if limit_total and len(items_to_process) > limit_total:
         items_to_process = items_to_process[:limit_total]
 
-    log.info("Selected %d daily PSP files to backfill without stride across %s", len(items_to_process), sorted(list(valid_years)))
+    log.info(
+        "Selected %d daily PSP files to backfill without stride across %s",
+        len(items_to_process),
+        sorted(list(valid_years)),
+    )
 
     session = requests.Session()
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -364,10 +383,22 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = executor.map(fetch_and_parse, items_to_process)
         default_fields = {
-            "report_date": None, "evening_peak_mw": None, "evening_peak_shortage_mw": None, "energy_met_mu": None,
-            "hydro_gen_mu": None, "wind_gen_mu": None, "solar_gen_mu": None, "energy_shortage_mu": None,
-            "max_demand_met_mw": None, "max_demand_time": None, "coal_gen_mu": None, "lignite_gen_mu": None,
-            "nuclear_gen_mu": None, "gas_gen_mu": None, "res_gen_mu": None, "total_gen_mu": None
+            "report_date": None,
+            "evening_peak_mw": None,
+            "evening_peak_shortage_mw": None,
+            "energy_met_mu": None,
+            "hydro_gen_mu": None,
+            "wind_gen_mu": None,
+            "solar_gen_mu": None,
+            "energy_shortage_mu": None,
+            "max_demand_met_mw": None,
+            "max_demand_time": None,
+            "coal_gen_mu": None,
+            "lignite_gen_mu": None,
+            "nuclear_gen_mu": None,
+            "gas_gen_mu": None,
+            "res_gen_mu": None,
+            "total_gen_mu": None,
         }
         for all_india, states in results:
             rep_date = all_india.get("report_date")
@@ -375,7 +406,8 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
                 continue
             record = {**default_fields, **all_india, "ingested_at": now_iso}
             with engine.connect() as conn:
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     INSERT INTO raw_daily_psp (
                         report_date, evening_peak_mw, evening_peak_shortage_mw, energy_met_mu,
                         hydro_gen_mu, wind_gen_mu, solar_gen_mu, energy_shortage_mu,
@@ -397,9 +429,12 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
                         energy_shortage_mu=COALESCE(excluded.energy_shortage_mu, raw_daily_psp.energy_shortage_mu),
                         max_demand_met_mw=COALESCE(excluded.max_demand_met_mw, raw_daily_psp.max_demand_met_mw),
                         ingested_at=excluded.ingested_at;
-                """), record)
+                """),
+                    record,
+                )
                 for s in states:
-                    conn.execute(text("""
+                    conn.execute(
+                        text("""
                         INSERT INTO raw_state_psp (
                             report_date, region, state, max_demand_mw, shortage_mw,
                             energy_met_mu, energy_shortage_mu, ingested_at
@@ -413,12 +448,18 @@ def backfill_daily_psp(limit_total: int = 2500, max_workers: int = 16) -> tuple[
                             energy_met_mu=excluded.energy_met_mu,
                             energy_shortage_mu=excluded.energy_shortage_mu,
                             ingested_at=excluded.ingested_at;
-                    """), {**s, "ingested_at": now_iso})
+                    """),
+                        {**s, "ingested_at": now_iso},
+                    )
                 conn.commit()
                 total_daily += 1
                 total_states += len(states)
 
-    log.info("Grid-India backfill complete: %d daily rows, %d state rows inserted/updated", total_daily, total_states)
+    log.info(
+        "Grid-India backfill complete: %d daily rows, %d state rows inserted/updated",
+        total_daily,
+        total_states,
+    )
     return total_daily, total_states
 
 
@@ -427,7 +468,7 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
     init_db()
     create_raw_tables()
     engine = get_engine()
-    
+
     catalog = fetch_file_catalog(limit=limit * 3)
     # Deduplicate by reporting date key, preferring Excel if both are available
     date_to_item: dict[str, dict[str, Any]] = {}
@@ -446,23 +487,23 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
             date_to_item[date_key] = item
         elif is_xls:
             date_to_item[date_key] = item
-    
+
     items_to_process = list(date_to_item.values())[:limit]
-    
+
     total_daily_rows = 0
     total_state_rows = 0
     now_iso = dt.datetime.now(dt.timezone.utc).isoformat()
-    
+
     RAW_DIR.mkdir(parents=True, exist_ok=True)
-    
+
     for item in items_to_process:
         rel_path = item.get("FilePath", "")
         if not rel_path:
             continue
-        
+
         file_url = f"{CDN_BASE}/{rel_path}"
         local_path = RAW_DIR / Path(rel_path).name
-        
+
         try:
             if not local_path.exists():
                 r = requests.get(file_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
@@ -470,8 +511,11 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
                     local_path.write_bytes(r.content)
                 else:
                     continue
-            
-            if local_path.suffix.lower() in [".xls", ".xlsx"] or "excel" in str(item.get("MimeType", "")).lower():
+
+            if (
+                local_path.suffix.lower() in [".xls", ".xlsx"]
+                or "excel" in str(item.get("MimeType", "")).lower()
+            ):
                 all_india, states = parse_mop_e_sheet(local_path)
             elif local_path.suffix.lower() == ".pdf" or "pdf" in str(item.get("MimeType", "")).lower():
                 all_india, states = parse_pdf_psp(local_path.read_bytes(), filename=item.get("Title_", ""))
@@ -483,7 +527,8 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
                 continue
 
             with engine.connect() as conn:
-                conn.execute(text("""
+                conn.execute(
+                    text("""
                     INSERT INTO raw_daily_psp (
                         report_date, evening_peak_mw, evening_peak_shortage_mw, energy_met_mu,
                         hydro_gen_mu, wind_gen_mu, solar_gen_mu, energy_shortage_mu,
@@ -512,10 +557,13 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
                         res_gen_mu=excluded.res_gen_mu,
                         total_gen_mu=excluded.total_gen_mu,
                         ingested_at=excluded.ingested_at;
-                """), {**all_india, "ingested_at": now_iso})
+                """),
+                    {**all_india, "ingested_at": now_iso},
+                )
 
                 for s in states:
-                    conn.execute(text("""
+                    conn.execute(
+                        text("""
                         INSERT INTO raw_state_psp (
                             report_date, region, state, max_demand_mw, shortage_mw,
                             energy_met_mu, energy_shortage_mu, ingested_at
@@ -529,7 +577,9 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
                             energy_met_mu=excluded.energy_met_mu,
                             energy_shortage_mu=excluded.energy_shortage_mu,
                             ingested_at=excluded.ingested_at;
-                    """), {**s, "ingested_at": now_iso})
+                    """),
+                        {**s, "ingested_at": now_iso},
+                    )
 
                 conn.commit()
                 total_daily_rows += 1
@@ -537,7 +587,13 @@ def ingest_daily_psp(limit: int = 15) -> tuple[int, int]:
         except Exception as e:
             log.warning("Could not ingest %s: %s", local_path.name, e)
 
-    log.info("Grid-India ingest complete: %d daily rows, %d state rows inserted/updated", total_daily_rows, total_state_rows)
+    if total_daily_rows == 0:
+        raise RuntimeError("Grid-India catalog yielded no valid daily reports")
+    log.info(
+        "Grid-India ingest complete: %d daily rows, %d state rows inserted/updated",
+        total_daily_rows,
+        total_state_rows,
+    )
     return total_daily_rows, total_state_rows
 
 

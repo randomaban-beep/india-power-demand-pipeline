@@ -31,6 +31,7 @@ function buildQueryString(params = {}) {
 async function apiGet(endpoint, params = {}) {
   const url = `${API_BASE}${endpoint}${buildQueryString(params)}`;
   const response = await fetch(url, {
+    signal: AbortSignal.timeout(30000),
     headers: {
       Accept: 'application/json',
     },

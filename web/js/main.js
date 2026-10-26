@@ -6,6 +6,10 @@
 import * as api from './api.js';
 import * as charts from './charts.js';
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 const state = {
   filters: {
     from: '',
@@ -17,7 +21,7 @@ const state = {
   summary: null,
   summaryBounds: {
     minDate: '2021-05-07',
-    maxDate: '2026-10-24',
+    maxDate: null,
   },
   rampsData: [],
   rampsSort: { col: 'abs_ramp_1h_mw', asc: false },
@@ -121,7 +125,7 @@ function renderSummaryKPIs(s) {
   if (latestPeakDateEl) latestPeakDateEl.textContent = s.latest_psp_date ? `Reported ${s.latest_psp_date}` : 'Latest daily PSP';
 
   if (reShareValEl) animateValue(reShareValEl, s.latest_re_share_pct, '%', 1);
-  if (reShareSubEl) reShareSubEl.textContent = `Avg ${s.avg_re_share_pct || 15.0}% across window`;
+  if (reShareSubEl) reShareSubEl.textContent = `Avg ${s.avg_re_share_pct ?? 'unavailable'}% across window`;
 
   if (recordsValEl) animateValue(recordsValEl, s.total_hourly_records);
   if (recordsSubEl) recordsSubEl.textContent = `${s.total_report_count} daily PSP reports loaded`;
@@ -196,10 +200,10 @@ async function loadHealthSection() {
         const tr = document.createElement('tr');
         const badgeClass = c.status === 'PASS' ? 'badge badge-pass' : 'badge badge-fail';
         tr.innerHTML = `
-          <td><code>${c.check_name}</code></td>
-          <td><code>${c.table_name || 'staging'}</code></td>
-          <td><span class="${badgeClass}">${c.status}</span></td>
-          <td>${c.details || ''}</td>
+          <td><code>${escapeHtml(c.check_name)}</code></td>
+          <td><code>${escapeHtml(c.table_name || 'staging')}</code></td>
+          <td><span class="${badgeClass}">${escapeHtml(c.status)}</span></td>
+          <td>${escapeHtml(c.details || '')}</td>
         `;
         checksBody.appendChild(tr);
       }
@@ -213,12 +217,12 @@ async function loadHealthSection() {
         const badgeClass = r.status === 'ok' ? 'badge badge-pass' : 'badge badge-fail';
         tr.innerHTML = `
           <td>${r.run_at ? r.run_at.substring(0, 19).replace('T', ' ') : ''}</td>
-          <td><code>${r.stage}</code></td>
-          <td><code>${r.source}</code></td>
-          <td><span class="${badgeClass}">${r.status}</span></td>
+          <td><code>${escapeHtml(r.stage)}</code></td>
+          <td><code>${escapeHtml(r.source)}</code></td>
+          <td><span class="${badgeClass}">${escapeHtml(r.status)}</span></td>
           <td class="num">${r.rows_inserted !== null ? Number(r.rows_inserted).toLocaleString() : '-'}</td>
           <td class="num">${r.duration_s !== null ? r.duration_s.toFixed(2) + 's' : '-'}</td>
-          <td>${r.message || ''}</td>
+          <td>${escapeHtml(r.message || '')}</td>
         `;
         runsBody.appendChild(tr);
       }
@@ -231,7 +235,7 @@ async function loadHealthSection() {
         const pill = document.createElement('div');
         pill.className = 'stat-pill';
         pill.innerHTML = `
-          <span class="stat-pill-label">${tbl}</span>
+          <span class="stat-pill-label">${escapeHtml(tbl)}</span>
           <span class="stat-pill-val">${Number(count).toLocaleString()}</span>
         `;
         tableCountsEl.appendChild(pill);
@@ -287,7 +291,19 @@ function renderRampsTable() {
 /**
  * Load all operational analytics sections and update charts according to current filter state.
  */
+let analyticsLoading = false;
+let analyticsPending = false;
 async function loadAnalyticsSections() {
+  if (analyticsLoading) { analyticsPending = true; return; }
+  analyticsLoading = true;
+  const status = document.getElementById('request-status');
+  status.textContent = 'Loading analytics…';
+  let failures = 0;
+  if (state.filters.from && state.filters.to && state.filters.from > state.filters.to) {
+    status.textContent = 'Start date must be on or before end date.';
+    analyticsLoading = false;
+    return;
+  }
   const queryFilters = {};
   if (state.filters.from) queryFilters.from = state.filters.from;
   if (state.filters.to) queryFilters.to = state.filters.to;
@@ -302,6 +318,7 @@ async function loadAnalyticsSections() {
     const dailyData = await api.fetchDailyDemand(queryFilters);
     charts.renderDailyDemandChart('chart-daily-demand', dailyData);
   } catch (err) {
+    failures++;
     console.error('Daily demand fetch failed:', err);
   }
 
@@ -309,6 +326,7 @@ async function loadAnalyticsSections() {
     const peaksData = await api.fetchMonthlyPeaks(queryFilters);
     charts.renderMonthlyPeaksChart('chart-monthly-peaks', peaksData);
   } catch (err) {
+    failures++;
     console.error('Monthly peaks fetch failed:', err);
   }
 
@@ -321,6 +339,7 @@ async function loadAnalyticsSections() {
       state.filters.tempFeature
     );
   } catch (err) {
+    failures++;
     console.error('Temperature vs demand fetch failed:', err);
   }
 
@@ -328,6 +347,7 @@ async function loadAnalyticsSections() {
     const heatmapData = await api.fetchHeatmap(queryFilters);
     charts.renderHeatmapChart('chart-heatmap', heatmapData);
   } catch (err) {
+    failures++;
     console.error('Heatmap fetch failed:', err);
   }
 
@@ -348,6 +368,7 @@ async function loadAnalyticsSections() {
     if (evePeakEl) evePeakEl.textContent = duckData.evening_peak_mw !== null ? `${Number(duckData.evening_peak_mw).toLocaleString()} MW (@ ${duckData.evening_peak_hour}:00)` : '-';
     if (rampEl) rampEl.textContent = duckData.trough_to_peak_ramp_mw !== null ? `+${Number(duckData.trough_to_peak_ramp_mw).toLocaleString()} MW` : '-';
   } catch (err) {
+    failures++;
     console.error('Duck curve fetch failed:', err);
   }
 
@@ -355,6 +376,7 @@ async function loadAnalyticsSections() {
     const reShareData = await api.fetchReShare(queryFilters);
     charts.renderReShareChart('chart-re-share', reShareData);
   } catch (err) {
+    failures++;
     console.error('Renewable share fetch failed:', err);
   }
 
@@ -369,6 +391,7 @@ async function loadAnalyticsSections() {
     if (realAnoEl) realAnoEl.textContent = anomalyRes.real_count || 0;
     if (dqAnoEl) dqAnoEl.textContent = anomalyRes.dq_count || 0;
   } catch (err) {
+    failures++;
     console.error('Anomalies fetch failed:', err);
   }
 
@@ -377,8 +400,12 @@ async function loadAnalyticsSections() {
     state.rampsData = rampsData;
     renderRampsTable();
   } catch (err) {
+    failures++;
     console.error('Ramps fetch failed:', err);
   }
+  status.textContent = failures ? `${failures} section(s) failed to load. Displayed charts may be stale; check the API and retry with Reset.` : 'Analytics loaded. Empty charts indicate no matching observations.';
+  analyticsLoading = false;
+  if (analyticsPending) { analyticsPending = false; loadAnalyticsSections(); }
 }
 
 /**
@@ -465,7 +492,7 @@ function setupEventHandlers() {
         if (fromInput) fromInput.value = '';
         if (toInput) toInput.value = '';
       } else {
-        const maxD = new Date(state.summaryBounds.maxDate || '2026-10-24');
+        const maxD = new Date(state.summaryBounds.maxDate || new Date().toISOString().slice(0, 10));
         const minD = new Date(maxD);
         if (span === '1y') minD.setFullYear(minD.getFullYear() - 1);
         if (span === '2y') minD.setFullYear(minD.getFullYear() - 2);
@@ -628,6 +655,7 @@ async function init() {
     }
     renderSummaryKPIs(summary);
   } catch (err) {
+    document.getElementById('kpi-health-badge').textContent = 'DATABASE UNAVAILABLE';
     console.error('Summary fetch failed:', err);
   }
 

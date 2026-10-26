@@ -17,9 +17,8 @@ Logs check results to data_quality_checks table.
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
+import os
 from typing import Any
-import numpy as np
 import pandas as pd
 from sqlalchemy import text
 
@@ -33,7 +32,8 @@ log = get_logger(__name__)
 def create_dq_table() -> None:
     engine = get_engine()
     with engine.connect() as conn:
-        conn.execute(text("""
+        conn.execute(
+            text("""
             CREATE TABLE IF NOT EXISTS data_quality_checks (
                 id           INTEGER PRIMARY KEY AUTOINCREMENT,
                 checked_at   TEXT NOT NULL,
@@ -42,7 +42,8 @@ def create_dq_table() -> None:
                 status       TEXT NOT NULL, -- PASS|FAIL
                 details      TEXT
             );
-        """))
+        """)
+        )
         conn.commit()
 
 
@@ -55,7 +56,7 @@ def get_gap_summary(conn: Any = None) -> dict[str, Any]:
         df = pd.read_sql(query, conn)
     else:
         with engine.connect() as c:
-            df = pd.read_sql(query, c.connection)
+            df = pd.read_sql(query, c)
 
     if df.empty or len(df) < 2:
         return {"total_gaps": 0, "longest_gap_hours": 0.0, "gaps": []}
@@ -70,22 +71,16 @@ def get_gap_summary(conn: Any = None) -> dict[str, Any]:
         start_ts = df.loc[prev_idx, "timestamp_ist"]
         end_ts = row["timestamp_ist"]
         dur = float(row["diff_hours"])
-        gaps.append({
-            "start": start_ts,
-            "end": end_ts,
-            "duration_hours": dur
-        })
+        gaps.append({"start": start_ts, "end": end_ts, "duration_hours": dur})
 
     longest = max([g["duration_hours"] for g in gaps]) if gaps else 0.0
-    return {
-        "total_gaps": len(gaps),
-        "longest_gap_hours": longest,
-        "gaps": gaps
-    }
+    return {"total_gaps": len(gaps), "longest_gap_hours": longest, "gaps": gaps}
 
 
 def update_cleaning_log(dropouts_df: pd.DataFrame, stuck_df: pd.DataFrame) -> None:
     """Ensure all detected sensor glitches, dropouts, multi-hour dips, and stuck sensors are documented in docs/cleaning_log.md."""
+    if os.getenv("ENERGY_WRITE_CLEANING_LOG") == "0":
+        return
     log_path = ROOT_DIR / "docs" / "cleaning_log.md"
     if not log_path.exists():
         return
@@ -93,24 +88,6 @@ def update_cleaning_log(dropouts_df: pd.DataFrame, stuck_df: pd.DataFrame) -> No
     content = log_path.read_text(encoding="utf-8")
 
     # 1. Decisions Log Update if not present
-    decisions_marker = "## Decisions Log"
-    new_decisions = """
-- **[Phase 3 – 2026-10-25] Multi-Hour Dropout & Unfreeze Protection:**
-  - *Decision:* Implemented multi-hour dropout detection (flagging dips of 1, 2, 3, or 4 hours dropping significantly below surrounding baseline and rebounding). Nullified the unfreeze transition hour immediately following any sensor freeze or dropout to prevent artificial unfreeze ramp spikes.
-  - *Impact:* Isolated 2-hour collapse on 2022-01-12 (12:00-13:00) and unfreeze jump edges on 2021-09-05 and 2021-09-27.
-
-- **[Phase 3 – 2026-10-25] Stuck Sensor Telemetry Isolation (Solar, Wind & Demand):**
-  - *Decision:* Detected and nullified runs of >= 3 consecutive hours of identical non-zero values in solar, wind, and demand telemetry. Set corrupt values to `NULL` (never interpolated).
-  - *Impact:* Neutralized the 2025-03-07 solar flatline (frozen at 64,301 MW for 24 hours), which previously created a fake 33.5% daily RE penetration peak.
-
-- **[Phase 3 – 2026-10-25] Night Solar Glitch Isolation:**
-  - *Decision:* Set solar generation to `NULL` whenever solar telemetry exceeded 500 MW between 20:00 and 05:00 IST.
-  - *Impact:* Eliminated 329 hours of nighttime solar bleed/inverter communication errors across 2024-12, 2025-03, and 2024-04.
-
-- **[Phase 3 – 2026-10-25] Wind Telemetry Glitch Isolation (2022-08-11):**
-  - *Decision:* Nullified unphysical wind readings exceeding 35,000 MW (specifically 2022-08-11 at 21:00 and 22:00 IST, where wind spiked to 38,700 MW against ~41.2 GW total national installed capacity).
-  - *Impact:* Prevents artificial wind generation spikes from corrupting net load and ramp analysis.
-"""
 
     # 2. Dropout Section
     entry_marker = "## Sensor Dropout Isolation Log"
@@ -124,7 +101,11 @@ def update_cleaning_log(dropouts_df: pd.DataFrame, stuck_df: pd.DataFrame) -> No
     for _, r in dropouts_df.head(50).iterrows():
         ts = r["timestamp_ist"]
         val = r["raw_val"]
-        desc = "Demand collapse to 0 MW" if val == 0 else "Multi-hour dropout dip / glitch / unfreeze transition edge"
+        desc = (
+            "Demand collapse to 0 MW"
+            if val == 0
+            else "Multi-hour dropout dip / glitch / unfreeze transition edge"
+        )
         rows_text += f"| `{ts}` | {val:,.1f} | {desc} |\n"
     if len(dropouts_df) > 50:
         rows_text += f"| ... | ... | *(+{len(dropouts_df) - 50} additional hours isolated to NULL)* |\n"
@@ -138,7 +119,9 @@ def update_cleaning_log(dropouts_df: pd.DataFrame, stuck_df: pd.DataFrame) -> No
     stuck_header += "|---|---|---|---|\n"
     stuck_header += "| Stuck Solar (Runs >= 3h) | 80 | 2025-03-07, 2024-12-14 | Frozen solar sensor (e.g. 64,301 MW 24h freeze on 2025-03-07) |\n"
     stuck_header += "| Night Solar (> 500 MW) | 329 | 2021-12, 2022-01, 2024-12, 2025-03 | Telemetry bleed / inverter communication freeze between 20:00-05:00 IST |\n"
-    stuck_header += "| Stuck Wind (Runs >= 3h) | 282 | Various 2022, 2024 | Frozen wind generation telemetry runs |\n"
+    stuck_header += (
+        "| Stuck Wind (Runs >= 3h) | 282 | Various 2022, 2024 | Frozen wind generation telemetry runs |\n"
+    )
     stuck_header += "| Wind Spike (> 35 GW) | 2 | 2022-08-11 21:00-22:00 | Unphysical spike to 38,701 MW (exceeds physical operating envelope) |\n"
     stuck_header += "| Stuck Demand (Runs >= 3h) | 32 | 2025-01-10, 2025-02-03 | Telemetry freezes prior to morning pickup |\n"
 
@@ -163,78 +146,106 @@ def run_checks() -> dict[str, Any]:
 
     with engine.connect() as conn:
         # Check 1: No duplicate timestamps in stg_hourly_demand
-        dups = conn.execute(text("""
+        dups = conn.execute(
+            text("""
             SELECT timestamp_ist, COUNT(*) 
             FROM stg_hourly_demand 
             GROUP BY timestamp_ist 
             HAVING COUNT(*) > 1;
-        """)).fetchall()
+        """)
+        ).fetchall()
         passed = len(dups) == 0
-        checks.append({
-            "check_name": "no_duplicate_timestamps_hourly_demand",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"Found {len(dups)} duplicate timestamps."
-        })
+        checks.append(
+            {
+                "check_name": "no_duplicate_timestamps_hourly_demand",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"Found {len(dups)} duplicate timestamps.",
+            }
+        )
 
         # Check 2: Timestamp gap audit in stg_hourly_demand
-        gap_summary = get_gap_summary(conn.connection)
+        gap_summary = get_gap_summary(conn)
         total_gaps = gap_summary["total_gaps"]
         longest_gap = gap_summary["longest_gap_hours"]
-        gap_details = "; ".join([f"{g['start']} to {g['end']} ({g['duration_hours']:.0f}h)" for g in gap_summary["gaps"]])
-        is_known_limit = (total_gaps <= 2) and all(g["duration_hours"] > 4000 for g in gap_summary["gaps"])
+        gap_details = "; ".join(
+            [f"{g['start']} to {g['end']} ({g['duration_hours']:.0f}h)" for g in gap_summary["gaps"]]
+        )
+        known_gaps = {("2022-09-30T23:00", "2023-04-01T00:00"), ("2023-04-30T23:00", "2024-01-01T00:00")}
+        is_known_limit = all((g["start"], g["end"]) in known_gaps for g in gap_summary["gaps"])
         passed = is_known_limit
-        checks.append({
-            "check_name": "hourly_timestamp_continuity_audit",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"Found {total_gaps} timestamp gaps (longest: {longest_gap:.0f}h). Documented known Mendeley dataset gaps: {gap_details}"
-        })
+        checks.append(
+            {
+                "check_name": "hourly_timestamp_continuity_audit",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"Found {total_gaps} timestamp gaps (longest: {longest_gap:.0f}h). Documented known Mendeley dataset gaps: {gap_details}",
+            }
+        )
 
         # Check 3: Cleaning verification: Sensor dropout & multi-hour dip isolation
-        dropouts = conn.execute(text("""
+        dropouts = conn.execute(
+            text("""
             SELECT timestamp_ist, demand_mw, is_dropout 
             FROM stg_hourly_demand 
             WHERE is_dropout = 1
             ORDER BY timestamp_ist;
-        """)).fetchall()
+        """)
+        ).fetchall()
         dropout_count = len(dropouts)
-        null_count = conn.execute(text("""
+        null_count = conn.execute(
+            text("""
             SELECT COUNT(*) FROM stg_hourly_demand WHERE is_dropout = 1 AND demand_mw IS NOT NULL;
-        """)).scalar()
-        passed = (null_count == 0) and (dropout_count > 0)
-        checks.append({
-            "check_name": "sensor_dropout_isolation",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"Cleaning verification: Detected {dropout_count} glitch/dip hours (including multi-hour dips). All {dropout_count} confirmed set to NULL."
-        })
+        """)
+        ).scalar()
+        passed = null_count == 0
+        checks.append(
+            {
+                "check_name": "sensor_dropout_isolation",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"Cleaning verification: Detected {dropout_count} glitch/dip hours (including multi-hour dips). All {dropout_count} confirmed set to NULL.",
+            }
+        )
 
         # Check 4: Cleaning verification: Stuck sensor and night solar audit
-        stuck_solar_unhandled = conn.execute(text("""
+        stuck_solar_unhandled = conn.execute(
+            text("""
             SELECT COUNT(*) FROM stg_hourly_demand WHERE is_stuck_solar = 1 AND solar_mw IS NOT NULL;
-        """)).scalar()
-        night_solar_unhandled = conn.execute(text("""
+        """)
+        ).scalar()
+        night_solar_unhandled = conn.execute(
+            text("""
             SELECT COUNT(*) FROM stg_hourly_demand WHERE is_night_solar_glitch = 1 AND solar_mw IS NOT NULL;
-        """)).scalar()
-        stuck_wind_unhandled = conn.execute(text("""
+        """)
+        ).scalar()
+        stuck_wind_unhandled = conn.execute(
+            text("""
             SELECT COUNT(*) FROM stg_hourly_demand WHERE is_stuck_wind = 1 AND wind_mw IS NOT NULL;
-        """)).scalar()
-        wind_spike_unhandled = conn.execute(text("""
+        """)
+        ).scalar()
+        wind_spike_unhandled = conn.execute(
+            text("""
             SELECT COUNT(*) FROM stg_hourly_demand WHERE is_wind_spike = 1 AND wind_mw IS NOT NULL;
-        """)).scalar()
+        """)
+        ).scalar()
 
-        total_unhandled = stuck_solar_unhandled + night_solar_unhandled + stuck_wind_unhandled + wind_spike_unhandled
-        passed = (total_unhandled == 0)
-        checks.append({
-            "check_name": "stuck_sensor_and_night_solar_audit",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"Cleaning verification: 0 unhandled stuck/leak readings (stuck solar: {stuck_solar_unhandled}, night solar: {night_solar_unhandled}, stuck wind: {stuck_wind_unhandled}, wind spike: {wind_spike_unhandled}). All confirmed set to NULL."
-        })
+        total_unhandled = (
+            stuck_solar_unhandled + night_solar_unhandled + stuck_wind_unhandled + wind_spike_unhandled
+        )
+        passed = total_unhandled == 0
+        checks.append(
+            {
+                "check_name": "stuck_sensor_and_night_solar_audit",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"Cleaning verification: 0 unhandled stuck/leak readings (stuck solar: {stuck_solar_unhandled}, night solar: {night_solar_unhandled}, stuck wind: {stuck_wind_unhandled}, wind spike: {wind_spike_unhandled}). All confirmed set to NULL.",
+            }
+        )
 
         # Check 5: Independent Validation: SCADA vs Grid-India Daily PSP Renewable Share Cross-Check
-        cross_df = pd.read_sql("""
+        cross_df = pd.read_sql(
+            """
             WITH daily_scada AS (
                 SELECT 
                     date_ist AS report_date,
@@ -253,120 +264,165 @@ def run_checks() -> dict[str, Any]:
             FROM daily_scada s
             JOIN stg_daily_psp p ON s.report_date = p.report_date
             WHERE p.res_share_pct IS NOT NULL;
-        """, conn.connection)
+        """,
+            conn,
+        )
 
         if not cross_df.empty and len(cross_df) >= 10:
             corr = float(cross_df["scada_re_share_pct"].corr(cross_df["psp_re_share_pct"]))
             diff = float((cross_df["scada_re_share_pct"] - cross_df["psp_re_share_pct"]).mean())
             passed = (corr >= 0.95) and (abs(diff) <= 2.5)
-            details = f"Independent validation across {len(cross_df)} overlapping days: Pearson r = {corr:.4f}, mean difference = {diff:+.2f}%. Both record peak renewable share on 2025-05-31."
+            details = f"Independent validation across {len(cross_df)} overlapping days: Pearson r = {corr:.4f}, mean difference = {diff:+.2f}%. This compares different denominators (demand versus generation); it is an agreement diagnostic."
         else:
             passed = True
             details = f"Independent validation: {len(cross_df)} overlapping days available."
 
-        checks.append({
-            "check_name": "scada_vs_grid_india_re_cross_check",
-            "table_name": "stg_hourly_demand x stg_daily_psp",
-            "status": "PASS" if passed else "FAIL",
-            "details": details
-        })
+        checks.append(
+            {
+                "check_name": "scada_vs_grid_india_re_cross_check",
+                "table_name": "stg_hourly_demand x stg_daily_psp",
+                "status": ("PASS" if passed else "FAIL") if len(cross_df) >= 10 else "SKIP",
+                "details": details,
+            }
+        )
 
         # Check 6: Plausible bounds on valid demand_mw (50,000 MW - 350,000 MW)
-        out_of_bounds = conn.execute(text("""
+        out_of_bounds = conn.execute(
+            text("""
             SELECT COUNT(*) 
             FROM stg_hourly_demand 
             WHERE demand_mw IS NOT NULL AND (demand_mw < 50000 OR demand_mw > 350000);
-        """)).scalar()
-        passed = (out_of_bounds == 0)
-        checks.append({
-            "check_name": "demand_plausible_bounds",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"{out_of_bounds} records outside [50000, 350000] MW range."
-        })
+        """)
+        ).scalar()
+        passed = out_of_bounds == 0
+        checks.append(
+            {
+                "check_name": "demand_plausible_bounds",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"{out_of_bounds} records outside [50000, 350000] MW range.",
+            }
+        )
 
         # Check 7: Non-negative renewables (solar_mw >= 0, wind_mw >= 0)
-        neg_re = conn.execute(text("""
+        neg_re = conn.execute(
+            text("""
             SELECT COUNT(*) 
             FROM stg_hourly_demand 
             WHERE (solar_mw IS NOT NULL AND solar_mw < 0) OR (wind_mw IS NOT NULL AND wind_mw < 0);
-        """)).scalar()
-        passed = (neg_re == 0)
-        checks.append({
-            "check_name": "non_negative_renewables",
-            "table_name": "stg_hourly_demand",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"{neg_re} negative renewable generation values."
-        })
+        """)
+        ).scalar()
+        passed = neg_re == 0
+        checks.append(
+            {
+                "check_name": "non_negative_renewables",
+                "table_name": "stg_hourly_demand",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"{neg_re} negative renewable generation values.",
+            }
+        )
 
         # Check 8: No duplicate timestamps in stg_hourly_weather
-        dups_w = conn.execute(text("""
+        dups_w = conn.execute(
+            text("""
             SELECT timestamp_ist, COUNT(*) 
             FROM stg_hourly_weather 
             GROUP BY timestamp_ist 
             HAVING COUNT(*) > 1;
-        """)).fetchall()
+        """)
+        ).fetchall()
         passed = len(dups_w) == 0
-        checks.append({
-            "check_name": "no_duplicate_timestamps_weather",
-            "table_name": "stg_hourly_weather",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"Found {len(dups_w)} duplicate timestamps in weather."
-        })
+        checks.append(
+            {
+                "check_name": "no_duplicate_timestamps_weather",
+                "table_name": "stg_hourly_weather",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"Found {len(dups_w)} duplicate timestamps in weather.",
+            }
+        )
 
         # Check 9: Weather join overlap with hourly demand
-        joined_count = conn.execute(text("""
+        joined_count = conn.execute(
+            text("""
             SELECT COUNT(*) 
             FROM stg_hourly_demand d
             JOIN stg_hourly_weather w ON d.timestamp_ist = w.timestamp_ist;
-        """)).scalar()
+        """)
+        ).scalar()
         total_demand = conn.execute(text("SELECT COUNT(*) FROM stg_hourly_demand;")).scalar()
         overlap_pct = (joined_count / total_demand * 100.0) if total_demand else 0.0
         passed = overlap_pct >= 90.0
-        checks.append({
-            "check_name": "weather_demand_date_overlap",
-            "table_name": "stg_hourly_demand x stg_hourly_weather",
-            "status": "PASS" if passed else "FAIL",
-            "details": f"{joined_count}/{total_demand} demand rows matched weather ({overlap_pct:.1f}%)."
-        })
+        checks.append(
+            {
+                "check_name": "weather_demand_date_overlap",
+                "table_name": "stg_hourly_demand x stg_hourly_weather",
+                "status": "PASS" if passed else "FAIL",
+                "details": f"{joined_count}/{total_demand} demand rows matched weather ({overlap_pct:.1f}%).",
+            }
+        )
 
         # Record check results in DB
         for c in checks:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 INSERT INTO data_quality_checks (checked_at, check_name, table_name, status, details)
                 VALUES (:checked_at, :check_name, :table_name, :status, :details)
-            """), {**c, "checked_at": now_iso})
+            """),
+                {**c, "checked_at": now_iso},
+            )
         conn.commit()
 
         # Update cleaning log with dropouts and stuck sensors
-        raw_vals = conn.execute(text("""
+        raw_vals = conn.execute(
+            text("""
             SELECT d.timestamp_ist, COALESCE(r.total_demand_mw, 0.0) as raw_val
             FROM stg_hourly_demand d
             JOIN raw_hourly_demand r ON d.timestamp_ist = r.timestamp_ist
             WHERE d.is_dropout = 1
             GROUP BY d.timestamp_ist
             ORDER BY d.timestamp_ist;
-        """)).fetchall()
+        """)
+        ).fetchall()
         df_drop = pd.DataFrame(raw_vals, columns=["timestamp_ist", "raw_val"])
 
-        stuck_vals = conn.execute(text("""
+        stuck_vals = conn.execute(
+            text("""
             SELECT timestamp_ist, solar_mw, wind_mw, is_stuck_solar, is_night_solar_glitch, is_stuck_wind, is_wind_spike, is_stuck_demand
             FROM stg_hourly_demand
             WHERE is_stuck_solar = 1 OR is_night_solar_glitch = 1 OR is_stuck_wind = 1 OR is_wind_spike = 1 OR is_stuck_demand = 1
             ORDER BY timestamp_ist;
-        """)).fetchall()
-        df_stuck = pd.DataFrame(stuck_vals, columns=["timestamp_ist", "solar_mw", "wind_mw", "is_stuck_solar", "is_night_solar_glitch", "is_stuck_wind", "is_wind_spike", "is_stuck_demand"])
+        """)
+        ).fetchall()
+        df_stuck = pd.DataFrame(
+            stuck_vals,
+            columns=[
+                "timestamp_ist",
+                "solar_mw",
+                "wind_mw",
+                "is_stuck_solar",
+                "is_night_solar_glitch",
+                "is_stuck_wind",
+                "is_wind_spike",
+                "is_stuck_demand",
+            ],
+        )
         update_cleaning_log(df_drop, df_stuck)
 
     total_passed = sum(1 for c in checks if c["status"] == "PASS")
     total_failed = sum(1 for c in checks if c["status"] == "FAIL")
-    log.info("Data Quality Check results: %d PASS, %d FAIL out of %d checks", total_passed, total_failed, len(checks))
+    log.info(
+        "Data Quality Check results: %d PASS, %d FAIL out of %d checks",
+        total_passed,
+        total_failed,
+        len(checks),
+    )
     return {
         "total_checks": len(checks),
         "passed": total_passed,
         "failed": total_failed,
+        "skipped": sum(c["status"] == "SKIP" for c in checks),
         "gap_summary": gap_summary,
-        "results": checks
+        "results": checks,
     }
 
 

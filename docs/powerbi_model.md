@@ -57,7 +57,7 @@ This document outlines the data model and schema relationships for building a Po
 
 2. **`mart_temp_vs_demand.csv`** (Temperature Elasticity Fact Table):
    - `timestamp_ist`, `date_ist`, `hour_ist`, `season`
-   - `avg_temperature_c`: 6-city demand-weighted average temperature (°C)
+   - `avg_temperature_c`: 6-city unweighted average temperature (°C)
    - `delhi_temp_c`, `mumbai_temp_c`: City temperatures (°C)
    - `cooling_degrees_c`: Temperature above 25°C base (°C)
    - `demand_mw`: Grid demand (MW)

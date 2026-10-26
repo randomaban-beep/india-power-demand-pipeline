@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import datetime as dt
-from pathlib import Path
+import sqlite3
+from fastapi.responses import JSONResponse
+from fastapi import Request
 import re
 import time
 from typing import Any
@@ -24,7 +26,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -50,6 +52,8 @@ def set_cached_response(cache_key: str, data: Any) -> None:
         expired_keys = [k for k, (t, _) in _IN_MEMORY_CACHE.items() if now - t >= CACHE_TTL_SECONDS]
         for k in expired_keys:
             _IN_MEMORY_CACHE.pop(k, None)
+    if len(_IN_MEMORY_CACHE) >= 200:
+        _IN_MEMORY_CACHE.pop(next(iter(_IN_MEMORY_CACHE)))
     _IN_MEMORY_CACHE[cache_key] = (now, data)
 
 
@@ -58,7 +62,9 @@ def validate_iso_date(date_str: str | None, param_name: str) -> str | None:
     if not date_str:
         return None
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
-        raise HTTPException(status_code=422, detail=f"Invalid {param_name} date '{date_str}'. Expected format YYYY-MM-DD.")
+        raise HTTPException(
+            status_code=422, detail=f"Invalid {param_name} date '{date_str}'. Expected format YYYY-MM-DD."
+        )
     try:
         dt.date.fromisoformat(date_str)
     except ValueError as err:
@@ -72,6 +78,24 @@ def parse_validated_seasons(seasons: str | None) -> list[str] | None:
         return queries.parse_seasons_param(seasons)
     except ValueError as err:
         raise HTTPException(status_code=422, detail=str(err)) from err
+
+
+@app.exception_handler(sqlite3.OperationalError)
+async def database_unavailable(request: Request, exc: sqlite3.OperationalError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Analytics database unavailable. Restore the published snapshot or run the pipeline."
+        },
+    )
+
+
+@app.get("/api/ready")
+def readiness() -> dict[str, str]:
+    with queries.closing(queries.get_connection()) as conn:
+        if conn.execute("SELECT 1 FROM mart_temp_vs_demand LIMIT 1").fetchone() is None:
+            raise HTTPException(status_code=503, detail="Analytics snapshot contains no observations.")
+    return {"status": "ready"}
 
 
 @app.get("/api/summary")
@@ -96,6 +120,8 @@ def get_daily_demand(
     """Return daily average and peak power demand with 7-day rolling baseline."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"daily_demand:{valid_from}:{valid_to}:{seasons}"
@@ -117,6 +143,8 @@ def get_monthly_peaks(
     """Return monthly maximum demand records and year-over-year escalation percentages."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"monthly_peaks:{valid_from}:{valid_to}:{seasons}"
@@ -139,6 +167,8 @@ def get_temp_demand(
     """Return sampled hourly temperature versus demand observations with 1C median bins."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     if feature not in queries.VALID_FEATURES:
@@ -166,6 +196,8 @@ def get_heatmap(
     """Return average demand matrix across months and hours of the day."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"heatmap:{valid_from}:{valid_to}:{seasons}"
@@ -200,6 +232,8 @@ def get_duck_curve(
     """Return diurnal generation profile and dusk ramping inflection metrics."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
 
     try:
         result = queries.get_duck_curve_profile(season, valid_from, valid_to)
@@ -218,6 +252,8 @@ def get_re_share(
     """Return monthly average renewable penetration and technology breakdown."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"re_share:{valid_from}:{valid_to}:{seasons}"
@@ -239,6 +275,8 @@ def get_anomalies(
     """Return daily z-scores and segmented operational versus data-quality outliers."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"anomalies:{valid_from}:{valid_to}:{seasons}"
@@ -260,6 +298,8 @@ def get_ramps(
     """Return top 10 hourly net-load ramping events with official peak cross-check."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     cache_key = f"ramps:{valid_from}:{valid_to}:{seasons}"
@@ -295,6 +335,8 @@ def export_csv(
     """Stream parameterised CSV text export for analytical data marts."""
     valid_from = validate_iso_date(from_date, "from")
     valid_to = validate_iso_date(to_date, "to")
+    if valid_from and valid_to and valid_from > valid_to:
+        raise HTTPException(status_code=422, detail="from must be on or before to")
     valid_seasons = parse_validated_seasons(seasons)
 
     try:
@@ -317,5 +359,4 @@ def favicon() -> Response:
 
 
 web_dir = ROOT_DIR / "web"
-web_dir.mkdir(parents=True, exist_ok=True)
 app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")

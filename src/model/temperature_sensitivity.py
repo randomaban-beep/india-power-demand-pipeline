@@ -34,7 +34,7 @@ def fit_ols_hc1(X_df: pd.DataFrame, y_series: pd.Series) -> dict[str, Any]:
     beta, _, _, _ = np.linalg.lstsq(X_mat, y_vec, rcond=None)
     preds = X_mat @ beta
     resid = y_vec - preds
-    sse = float(np.sum(resid ** 2))
+    sse = float(np.sum(resid**2))
     sst = float(np.sum((y_vec - np.mean(y_vec)) ** 2))
     r2 = 1.0 - (sse / sst) if sst > 0 else 0.0
     rmse = float(np.sqrt(sse / n))
@@ -58,7 +58,7 @@ def fit_ols_hc1(X_df: pd.DataFrame, y_series: pd.Series) -> dict[str, Any]:
         "aic": aic,
         "bic": bic,
         "n": n,
-        "p": p
+        "p": p,
     }
 
 
@@ -70,12 +70,15 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
         close_conn = True
 
     try:
-        df = pd.read_sql("""
+        df = pd.read_sql(
+            """
             SELECT report_date, year_str, month_str, weekday_str, max_demand_met_mw, daily_mean_temp_c 
             FROM mart_daily_weather_demand 
             WHERE daily_mean_temp_c IS NOT NULL AND max_demand_met_mw IS NOT NULL
             ORDER BY report_date;
-        """, conn)
+        """,
+            conn,
+        )
 
         if df.empty or len(df) < 25:
             log.warning("Insufficient data in mart_daily_weather_demand for regression")
@@ -94,7 +97,7 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
                 "temp_max_c": 0.0,
                 "threshold_choice_c": 25.0,
                 "threshold_criterion": "A priori selection of 25.0°C cooling base with sensitivity analysis across 22.0°C to 28.0°C",
-                "thresholds": []
+                "thresholds": [],
             }
 
         total_obs = len(df)
@@ -106,7 +109,9 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
         d_month = pd.get_dummies(df["month_str"], prefix="m", drop_first=True, dtype=float)
         d_year = pd.get_dummies(df["year_str"], prefix="y", drop_first=True, dtype=float)
 
-        X_ctrl = pd.concat([pd.Series(1.0, index=df.index, name="intercept"), d_week, d_month, d_year], axis=1)
+        X_ctrl = pd.concat(
+            [pd.Series(1.0, index=df.index, name="intercept"), d_week, d_month, d_year], axis=1
+        )
         fit_ctrl = fit_ols_hc1(X_ctrl, df["max_demand_met_mw"])
         r2_ctrl = float(fit_ctrl["r2"])
 
@@ -119,11 +124,16 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
             cooling_deg = np.maximum(0.0, df["daily_mean_temp_c"].values - t)
             n_days_above = int((df["daily_mean_temp_c"] >= t).sum())
 
-            X_full = pd.concat([
-                pd.Series(1.0, index=df.index, name="intercept"),
-                pd.Series(cooling_deg, index=df.index, name="cooling_deg"),
-                d_week, d_month, d_year
-            ], axis=1)
+            X_full = pd.concat(
+                [
+                    pd.Series(1.0, index=df.index, name="intercept"),
+                    pd.Series(cooling_deg, index=df.index, name="cooling_deg"),
+                    d_week,
+                    d_month,
+                    d_year,
+                ],
+                axis=1,
+            )
 
             fit_full = fit_ols_hc1(X_full, df["max_demand_met_mw"])
 
@@ -134,20 +144,22 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
             r2_full = float(fit_full["r2"])
             delta_r2 = r2_full - r2_ctrl
 
-            threshold_results.append({
-                "threshold_c": t,
-                "n_days_above": n_days_above,
-                "n_obs": total_obs,
-                "slope_mw_per_c": round(slope, 1),
-                "se_hc1": round(se_slope, 1),
-                "ci_lower": round(ci_lower, 1),
-                "ci_upper": round(ci_upper, 1),
-                "r2_ctrl": round(r2_ctrl, 4),
-                "r2_full": round(r2_full, 4),
-                "delta_r2": round(delta_r2, 4),
-                "aic": round(fit_full["aic"], 1),
-                "rmse": round(fit_full["rmse"], 1),
-            })
+            threshold_results.append(
+                {
+                    "threshold_c": t,
+                    "n_days_above": n_days_above,
+                    "n_obs": total_obs,
+                    "slope_mw_per_c": round(slope, 1),
+                    "se_hc1": round(se_slope, 1),
+                    "ci_lower": round(ci_lower, 1),
+                    "ci_upper": round(ci_upper, 1),
+                    "r2_ctrl": round(r2_ctrl, 4),
+                    "r2_full": round(r2_full, 4),
+                    "delta_r2": round(delta_r2, 4),
+                    "aic": round(fit_full["aic"], 1),
+                    "rmse": round(fit_full["rmse"], 1),
+                }
+            )
 
         # Baseline chosen threshold: 25.0°C
         choice = next((r for r in threshold_results if r["threshold_c"] == 25.0), threshold_results[0])
@@ -167,7 +179,7 @@ def compute_temperature_sensitivity(conn: sqlite3.Connection | None = None) -> d
             "temp_max_c": round(temp_max_all, 1),
             "threshold_choice_c": 25.0,
             "threshold_criterion": "A priori selection of 25.0°C cooling base with full-sample hinge sensitivity across 22.0°C to 28.0°C",
-            "thresholds": threshold_results
+            "thresholds": threshold_results,
         }
     finally:
         if close_conn:

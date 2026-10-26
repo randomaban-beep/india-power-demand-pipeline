@@ -48,3 +48,12 @@ Thumbs.db
 
 # Distribution / packaging
 *.spec
+
+data/benchmark/
+data/run*/
+.coverage
+coverage.xml
+htmlcov/
+.venv-*/
+
+data/sample.db
