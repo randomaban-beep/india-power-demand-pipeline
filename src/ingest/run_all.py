@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import sys
 import time
 from sqlalchemy import text
 
 from src.ingest.grid_india import ingest_daily_psp
 from src.ingest.mendeley import ingest_mendeley_historical
 from src.ingest.open_meteo import ingest_weather
+from src.utils.config import DATA_DIR
 from src.utils.db import get_engine, init_db
 from src.utils.logging import get_logger
 
@@ -45,6 +47,14 @@ def run_all(mendeley_files: int = 12) -> None:
     """Execute all ingest stages sequentially."""
     init_db()
     log.info("Starting end-to-end ingest...")
+    engine = get_engine()
+
+    try:
+        with engine.connect() as conn:
+            pre_count = conn.execute(text("SELECT COUNT(*) FROM stg_daily_psp")).scalar() or 0
+        (DATA_DIR / ".pre_ingest_psp_count").write_text(str(pre_count))
+    except Exception:
+        pass
 
     # 1. Grid-India daily PSP reports
     t0 = time.time()
@@ -56,8 +66,9 @@ def run_all(mendeley_files: int = 12) -> None:
         dur = round(time.time() - t0, 2)
         log_run("ingest", "grid_india", 0, 0, dur, "error", str(e))
         log.error("Grid-India ingest failed: %s", e)
+        raise RuntimeError(f"Grid-India ingest failed: {e}") from e
 
-    # 2. Mendeley historical hourly data
+    # 2. Mendeley historical hourly data (skips if rows exist)
     t0 = time.time()
     try:
         hourly_rows = ingest_mendeley_historical(max_files=mendeley_files)
@@ -67,20 +78,26 @@ def run_all(mendeley_files: int = 12) -> None:
         dur = round(time.time() - t0, 2)
         log_run("ingest", "mendeley", 0, 0, dur, "error", str(e))
         log.error("Mendeley ingest failed: %s", e)
+        raise RuntimeError(f"Mendeley ingest failed: {e}") from e
 
-    # 3. Open-Meteo weather data (covering historical period)
+    # 3. Open-Meteo weather data (incremental up to yesterday)
     t0 = time.time()
     try:
-        weather_rows = ingest_weather(start_date="2022-01-01", end_date="2023-12-31")
+        weather_rows = ingest_weather()
         dur = round(time.time() - t0, 2)
         log_run("ingest", "open_meteo", weather_rows, weather_rows, dur, "ok", f"{weather_rows} weather rows across 6 cities")
     except Exception as e:
         dur = round(time.time() - t0, 2)
         log_run("ingest", "open_meteo", 0, 0, dur, "error", str(e))
         log.error("Open-Meteo ingest failed: %s", e)
+        raise RuntimeError(f"Open-Meteo weather ingest failed: {e}") from e
 
     log.info("Ingest run complete!")
 
 
 if __name__ == "__main__":
-    run_all()
+    try:
+        run_all()
+    except Exception as err:
+        log.error("Ingest pipeline failed: %s", err)
+        sys.exit(1)

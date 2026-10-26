@@ -73,13 +73,15 @@ def fetch_file_catalog(limit: int = 30) -> list[dict[str, Any]]:
     headers = {"User-Agent": "Mozilla/5.0"}
     payload = {"_source": "GRDW", "_type": "DAILY_PSP_REPORT"}
     try:
-        resp = requests.post(API_URL, json=payload, headers=headers, timeout=20)
+        resp = requests.post(API_URL, json=payload, headers=headers, timeout=25)
         resp.raise_for_status()
         data = resp.json().get("retData", [])
+        if not data:
+            raise RuntimeError("Grid-India API returned an empty catalog (retData is empty)")
         return data[:limit]
     except Exception as e:
         log.error("Failed to fetch Grid-India file catalog: %s", e)
-        return []
+        raise
 
 
 def parse_mop_e_sheet(xls_input: Path | bytes) -> tuple[dict[str, Any], list[dict[str, Any]]]:
