@@ -92,37 +92,45 @@ def fetch_city_weather_recent(
         "hourly": "temperature_2m,relative_humidity_2m,wind_speed_10m",
         "timezone": "Asia/Kolkata",
     }
-    try:
-        resp = requests.get(FORECAST_API_URL, params=params, timeout=30)
-        resp.raise_for_status()
-        data = resp.json().get("hourly", {})
+    resp = requests.get(FORECAST_API_URL, params=params, timeout=30)
+    resp.raise_for_status()
+    data = resp.json().get("hourly", {})
 
-        times = data.get("time", [])
-        temps = data.get("temperature_2m", [])
-        humids = data.get("relative_humidity_2m", [])
-        winds = data.get("wind_speed_10m", [])
+    times = data.get("time", [])
+    temps = data.get("temperature_2m", [])
+    humids = data.get("relative_humidity_2m", [])
+    winds = data.get("wind_speed_10m", [])
 
-        # Filter out future hours beyond current IST time
-        now_ist = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5, minutes=30)
-        now_str = now_ist.strftime("%Y-%m-%dT%H:%M")
+    now_ist = dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=5, minutes=30)
+    now_str = now_ist.strftime("%Y-%m-%dT%H:%M")
 
-        records = []
-        for t, temp, rh, ws in zip(times, temps, humids, winds):
-            if t <= now_str:
-                records.append({
-                    "city": city,
-                    "timestamp_ist": t,
-                    "temperature_2m": temp,
-                    "relative_humidity_2m": rh,
-                    "wind_speed_10m": ws,
-                })
-        return records
-    except Exception as e:
-        log.warning("Forecast API fetch failed for %s: %s", city, e)
-        return []
+    records = []
+    for t, temp, rh, ws in zip(times, temps, humids, winds):
+        if t <= now_str:
+            records.append({
+                "city": city,
+                "timestamp_ist": t,
+                "temperature_2m": temp,
+                "relative_humidity_2m": rh,
+                "wind_speed_10m": ws,
+            })
+    return records
 
 
-def ingest_weather(start_date: str = "2021-09-01", end_date: str | None = None) -> int:
+def get_latest_city_weather_date(city: str) -> dt.date | None:
+    """Find the newest recorded date for a given city in raw_weather."""
+    engine = get_engine()
+    with engine.connect() as conn:
+        res = conn.execute(
+            text("SELECT MAX(timestamp_ist) FROM raw_weather WHERE city = :city"),
+            {"city": city}
+        ).scalar()
+        if res:
+            return dt.date.fromisoformat(res[:10])
+    return None
+
+
+def ingest_weather(start_date: str | None = None, end_date: str | None = None) -> int:
     """Ingest weather records up to yesterday across all configured cities."""
     init_db()
     create_raw_weather_table()
@@ -137,21 +145,36 @@ def ingest_weather(start_date: str = "2021-09-01", end_date: str | None = None) 
     total_inserted = 0
 
     for city, coords in CITIES.items():
-        log.info("Fetching weather for %s (%s to %s)...", city, start_date, end_date)
-        try:
-            # 1. Fetch from Archive API
-            archive_end = (today - dt.timedelta(days=5)).isoformat()
-            records = fetch_city_weather_archive(city, coords["lat"], coords["lon"], start_date, min(end_date, archive_end))
+        if start_date is not None:
+            city_start_date = start_date
+        else:
+            latest_d = get_latest_city_weather_date(city)
+            if latest_d is not None:
+                city_start_date = (latest_d - dt.timedelta(days=7)).isoformat()
+            else:
+                city_start_date = "2021-09-01"
 
-            # 2. Fetch last 7 days from Forecast API to ensure weather reaches yesterday
+        if city_start_date > end_date:
+            city_start_date = end_date
+
+        log.info("Fetching weather for %s (%s to %s)...", city, city_start_date, end_date)
+        try:
+            records: list[dict[str, Any]] = []
+            archive_end = (today - dt.timedelta(days=5)).isoformat()
+            if city_start_date <= archive_end:
+                records = fetch_city_weather_archive(
+                    city, coords["lat"], coords["lon"], city_start_date, min(end_date, archive_end)
+                )
+
             recent_records = fetch_city_weather_recent(city, coords["lat"], coords["lon"], past_days=7)
-            # Combine dicts keyed on timestamp
             rec_map = {r["timestamp_ist"]: r for r in records}
             for r in recent_records:
-                if r["timestamp_ist"] <= f"{end_date}T23:00":
+                if r["timestamp_ist"] <= f"{end_date}T23:00" and r["timestamp_ist"] >= f"{city_start_date}T00:00":
                     rec_map[r["timestamp_ist"]] = r
 
             final_records = list(rec_map.values())
+            if not final_records:
+                raise RuntimeError(f"No weather records retrieved for {city} between {city_start_date} and {end_date}")
 
             with engine.connect() as conn:
                 conn.execute(text("""
@@ -174,6 +197,7 @@ def ingest_weather(start_date: str = "2021-09-01", end_date: str | None = None) 
             log.info("Loaded %d weather rows for %s", len(final_records), city)
         except Exception as e:
             log.error("Failed to fetch weather for %s: %s", city, e)
+            raise RuntimeError(f"Open-Meteo weather fetch failed for {city}: {e}") from e
 
     log.info("Open-Meteo weather ingest complete: %d total rows", total_inserted)
     return total_inserted

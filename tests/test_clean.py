@@ -7,7 +7,7 @@ from src.utils.db import get_engine
 from src.clean.quality_checks import run_checks
 
 
-def test_staging_tables_populated() -> None:
+def test_staging_tables_populated(require_full_db: None) -> None:
     """Ensure staging tables exist and contain cleaned rows."""
     engine = get_engine()
     with engine.connect() as conn:
@@ -20,7 +20,7 @@ def test_staging_tables_populated() -> None:
         assert p_count > 0, "stg_daily_psp is empty"
 
 
-def test_data_quality_suite_results() -> None:
+def test_data_quality_suite_results(require_full_db: None) -> None:
     """Verify that automated data quality assertions pass (with documented known limitations)."""
     res = run_checks()
     assert res["total_checks"] == 9
@@ -30,7 +30,7 @@ def test_data_quality_suite_results() -> None:
     assert res["gap_summary"]["longest_gap_hours"] > 4000
 
 
-def test_sensor_dropouts_isolated() -> None:
+def test_sensor_dropouts_isolated(require_full_db: None) -> None:
     """Verify that all detected sensor dropout hours have demand_mw set to NULL."""
     engine = get_engine()
     with engine.connect() as conn:

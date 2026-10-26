@@ -172,6 +172,12 @@ def ingest_mendeley_historical(max_files: int | None = None) -> int:
     create_raw_hourly_table()
     engine = get_engine()
 
+    with engine.connect() as conn:
+        count = conn.execute(text("SELECT COUNT(*) FROM raw_hourly_demand")).scalar() or 0
+    if count > 0:
+        log.info("raw_hourly_demand already contains %d rows; skipping Mendeley static archive re-download.", count)
+        return count
+
     files = get_mendeley_file_list()
     # Prioritize 2024-2025 multi-month report and monthly 5-minute files
     # To keep CI runtime fast and manageable under GitHub timeouts, process files under 20MB

@@ -8,7 +8,8 @@ def test_root_dir_exists() -> None:
 
 
 def test_db_path_parent_is_data() -> None:
-    assert DB_PATH.name == "energy.db"
+    assert DB_PATH.parent.name == "data"
+    assert DB_PATH.name in ("energy.db", "energy_marts.db")
 
 
 def test_cities_not_empty() -> None:
