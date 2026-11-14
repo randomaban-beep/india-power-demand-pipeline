@@ -356,7 +356,8 @@ To rigorously evaluate the cooling balance point without subset selection bias, 
 - **Estimator:** Full-sample OLS with hinge term $\\max(T - T^*, 0)$ controlling for weekday, month, and year fixed effects with White's HC1 robust covariance matrix.
 - **Baseline Controls Contribution:** Fixed effects for day-of-week, calendar month, and multi-year economic trend account for **{r2_ctrl*100:.1f}%** ($R^2={r2_ctrl:.4f}$) of daily peak demand variance.
 - **Marginal Temperature Impact:** Adding Cooling Degree Days above 25.0°C delivers an incremental **+{delta_r2*100:.1f}%** ($\\Delta R^2=+{delta_r2:.4f}$) of explanatory power, lifting overall model fit to **{r2_full*100:.1f}%** ($R^2={r2_full:.4f}$).
-- **Threshold Selection Criterion:** 25.0°C was chosen a priori as a standard cooling base temperature for power systems analysis; candidate thresholds from 22.0°C to 28.0°C are reported above for sensitivity across alternative bases.
+- **Threshold Selection Criterion:** 25.0°C was chosen a priori as a conventional cooling base temperature for power systems analysis rather than optimizing fit post-hoc on sample data (where 26°C–27°C fits marginally higher); candidate thresholds from 22.0°C to 28.0°C show cooling elasticity spanning +5.9 to +10.1 GW/°C across alternative bases.
+- **Standard Errors & Serial Autocorrelation:** White's HC1 covariance estimator is employed to account for heteroskedasticity. Note that daily time-series residuals may exhibit residual autocorrelation; standard errors and confidence intervals under Newey-West (HAC) estimators with multi-day lags would be slightly wider.
 
 ---
 

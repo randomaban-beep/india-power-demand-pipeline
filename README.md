@@ -52,6 +52,12 @@ Evaluated on the same full sample of 753 daily observations using an OLS regress
 | **28.0°C** | 274 | 753 | +10,063.2 | 449.6 | [9,181.9, 10,944.5] | 0.7925 | 0.8586 | **+0.0661** | 13,762.0 |
 
 
+> **Why 25.0°C as the Primary Base?**
+> While candidate models at 26°C and 27°C achieve marginally higher fit ($R^2 = 0.870$ vs $0.865$), **25.0°C was chosen *a priori*** as the standard cooling degree base in power systems literature to avoid data dredging / post-hoc threshold optimization. Across alternative candidate thresholds from 22°C to 28°C, the estimated cooling elasticity robustly spans **5.9 GW to 10.1 GW** (+5.9 to +10.1 GW/°C).
+>
+> **Note on Standard Errors & Serial Correlation:**
+> Standard errors are reported using White's heteroskedasticity-consistent covariance estimator (HC1). While HC1 accounts for unequal error variance, it does not adjust for potential daily serial autocorrelation; consequently, the 95% confidence interval reported may be narrower than one derived under a Newey-West (HAC) estimator with serial lag correction.
+
 ---
 
 ### 3. Diurnal Peak Load by Month
@@ -295,13 +301,14 @@ Open [http://localhost:8000](http://localhost:8000) in your browser. Interactive
 
 ---
 
-## 🌐 Live Website & Cloud Deployment
+## 🌐 Web Application & Deployment Configuration
 
-- **Live URL:** `https://india-power-demand-pipeline.onrender.com` *(Deployment URL placeholder)*
-- **Interactive API Docs:** `https://india-power-demand-pipeline.onrender.com/docs`
+- **Application Architecture:** Standalone vanilla HTML5/CSS3/ES-modules frontend with Apache ECharts and FastAPI backend (`server/main.py` + `web/`). Built and containerized, deployment config included (`Dockerfile` and `render.yaml`).
+- **Local Interactive URL:** [http://localhost:8000](http://localhost:8000) (Interactive Swagger Docs at [http://localhost:8000/docs](http://localhost:8000/docs))
+- **Deployment URL (Optional Render Service):** `https://india-power-demand-pipeline.onrender.com`
 
-### Cloud Deployment (Render / Docker)
-The application includes a production-ready `Dockerfile` and `render.yaml` for automated deployment on Render's free tier:
+### Containerization & Deployment Configuration (Render / Docker)
+The application is fully containerized and includes production deployment configurations:
 1. Connect this repository to [Render](https://render.com).
 2. Create a **Web Service** selecting this repository.
 3. Render automatically detects `render.yaml` and deploys with:
